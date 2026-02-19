@@ -1,6 +1,6 @@
 # OpenAssistant
 
-A personal AI assistant with persistent memory powered by LightRAG and RAG-Anything. Inspired by [OpenClaw](https://openclaw.ai/), built with Next.js, TypeScript, and [Better Auth](https://www.better-auth.com/).
+A personal AI assistant with persistent memory powered by LightRAG and RAG-Anything. Built with Next.js, TypeScript, and [Better Auth](https://www.better-auth.com/).
 
 ## Features
 

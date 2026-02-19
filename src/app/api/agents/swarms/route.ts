@@ -1,0 +1,74 @@
+import { NextRequest } from "next/server";
+import { requireSession } from "@/lib/auth-server";
+import { SwarmOrchestrator, presetSwarms } from "@/lib/agents";
+import type { SwarmDefinition } from "@/lib/agents";
+
+/** GET /api/agents/swarms — List available swarm presets */
+export async function GET() {
+  try {
+    await requireSession();
+
+    const swarms = presetSwarms.map((s) => ({
+      id: s.id,
+      name: s.name,
+      description: s.description,
+      aggregation: s.aggregation,
+      agents: s.agents.map((a) => ({
+        id: a.id,
+        name: a.name,
+        role: a.role,
+      })),
+    }));
+
+    return Response.json({ swarms });
+  } catch (error) {
+    if (error instanceof Error && error.message === "Unauthorized") {
+      return Response.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    return Response.json({ error: "Internal server error" }, { status: 500 });
+  }
+}
+
+/** POST /api/agents/swarms — Run a swarm on a task */
+export async function POST(req: NextRequest) {
+  try {
+    const session = await requireSession();
+    const body = await req.json();
+
+    const { swarmId, task, context, customSwarm, agentTasks } = body as {
+      swarmId?: string;
+      task: string;
+      context?: string;
+      customSwarm?: SwarmDefinition;
+      agentTasks?: Record<string, string>;
+    };
+
+    if (!task) {
+      return Response.json({ error: "Task is required" }, { status: 400 });
+    }
+
+    const definition = customSwarm || presetSwarms.find((s) => s.id === swarmId);
+    if (!definition) {
+      return Response.json({ error: "Swarm not found" }, { status: 404 });
+    }
+
+    const orchestrator = new SwarmOrchestrator(definition);
+
+    const result = await orchestrator.run({
+      swarmId: definition.id,
+      task,
+      context,
+      userId: session.user.id,
+      conversationId: `swarm-${definition.id}-${Date.now()}`,
+      agentTasks,
+    });
+
+    return Response.json(result);
+  } catch (error) {
+    console.error("Swarm execution error:", error);
+    if (error instanceof Error && error.message === "Unauthorized") {
+      return Response.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    return Response.json({ error: "Internal server error" }, { status: 500 });
+  }
+}

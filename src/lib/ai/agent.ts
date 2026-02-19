@@ -1,14 +1,14 @@
-import { openai } from "@ai-sdk/openai";
 import { generateText, streamText, tool } from "ai";
 import { z } from "zod";
 import { skillRegistry } from "@/lib/skills/registry";
 import { memoryManager } from "@/lib/rag/memory";
 import { integrationRegistry } from "@/lib/integrations";
+import { resolveModelFromString } from "@/lib/ai/providers";
 import type { SkillContext, SkillResult } from "@/lib/skills/types";
 
 const SYSTEM_PROMPT = `You are OpenAssistant, a personal AI assistant with persistent memory and extensible skills.
 
-You are modeled after the capabilities of OpenClaw — a proactive, autonomous personal AI assistant. Like OpenClaw, you:
+You are a proactive, autonomous personal AI assistant. You:
 
 1. **Remember everything**: You have access to a knowledge graph powered by LightRAG. Use the save_memory and recall_memory tools to store and retrieve information about the user.
 
@@ -19,6 +19,8 @@ You are modeled after the capabilities of OpenClaw — a proactive, autonomous p
 4. **Be direct and helpful**: Give concise, actionable responses. You're a teammate, not just a chatbot.
 
 5. **Use integrations**: You have access to connected integrations (chat platforms, smart home, music, etc.). Use them when the user asks to interact with those services.
+
+6. **Agent teams & swarms**: Users can invoke multi-agent teams and swarms via /team and /swarm commands in chat, or use the Teams dashboard. Mention this capability when relevant.
 
 Guidelines:
 - At the start of each conversation, recall relevant memories about the user.
@@ -126,7 +128,7 @@ export function streamAgentResponse(params: {
   const allMessages = [...systemMessages, ...params.messages];
 
   return streamText({
-    model: openai(process.env.AI_MODEL || "gpt-4o"),
+    model: resolveModelFromString(process.env.AI_MODEL),
     messages: allMessages,
     tools: buildTools(context),
     maxSteps: 10,
@@ -161,7 +163,7 @@ export async function generateAgentResponse(params: {
   const allMessages = [...systemMessages, ...params.messages];
 
   const result = await generateText({
-    model: openai(process.env.AI_MODEL || "gpt-4o"),
+    model: resolveModelFromString(process.env.AI_MODEL),
     messages: allMessages,
     tools: buildTools(context),
     maxSteps: 10,

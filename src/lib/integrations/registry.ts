@@ -27,6 +27,11 @@ import { mistralIntegration, MistralInstance } from "./ai/mistral";
 import { deepseekIntegration, DeepSeekInstance } from "./ai/deepseek";
 import { xaiIntegration, XAIInstance } from "./ai/xai";
 import { perplexityIntegration, PerplexityInstance } from "./ai/perplexity";
+import { minimaxIntegration, MiniMaxInstance } from "./ai/minimax";
+import { glmIntegration, GLMInstance } from "./ai/glm";
+import { huggingfaceIntegration, HuggingFaceInstance } from "./ai/huggingface";
+import { lmstudioIntegration, LMStudioInstance } from "./ai/lmstudio";
+import { vercelGatewayIntegration, VercelGatewayInstance } from "./ai/vercel-gateway";
 
 import { notionIntegration, NotionInstance } from "./productivity/notion";
 import { obsidianIntegration, ObsidianInstance } from "./productivity/obsidian";
@@ -151,6 +156,11 @@ integrationRegistry.register(mistralIntegration, MistralInstance as unknown as I
 integrationRegistry.register(deepseekIntegration, DeepSeekInstance as unknown as InstanceConstructor);
 integrationRegistry.register(xaiIntegration, XAIInstance as unknown as InstanceConstructor);
 integrationRegistry.register(perplexityIntegration, PerplexityInstance as unknown as InstanceConstructor);
+integrationRegistry.register(minimaxIntegration, MiniMaxInstance as unknown as InstanceConstructor);
+integrationRegistry.register(glmIntegration, GLMInstance as unknown as InstanceConstructor);
+integrationRegistry.register(huggingfaceIntegration, HuggingFaceInstance as unknown as InstanceConstructor);
+integrationRegistry.register(lmstudioIntegration, LMStudioInstance as unknown as InstanceConstructor);
+integrationRegistry.register(vercelGatewayIntegration, VercelGatewayInstance as unknown as InstanceConstructor);
 
 // ── Productivity ──
 integrationRegistry.register(notionIntegration, NotionInstance as unknown as InstanceConstructor);

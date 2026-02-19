@@ -3,7 +3,7 @@ import { ragClient } from "./client";
 import type { MemoryType } from "./types";
 
 /**
- * Two-tier memory system inspired by OpenClaw:
+ * Two-tier memory system:
  * - Short-term: Recent conversation context (kept in DB, periodically summarized)
  * - Long-term: Important facts, preferences, learned info (stored in RAG)
  * - Episodic: Notable events and interactions (stored in RAG)
