@@ -135,6 +135,30 @@ export function Sidebar() {
             Memory
           </Link>
           <Link
+            href="/integrations"
+            className={cn(
+              "flex items-center gap-2 rounded-md px-3 py-2 text-sm",
+              pathname === "/integrations"
+                ? "bg-muted text-foreground"
+                : "text-muted-foreground hover:bg-muted hover:text-foreground"
+            )}
+          >
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
+              <path d="M4 6h16M4 12h16M4 18h16" />
+              <circle cx="8" cy="6" r="1.5" fill="currentColor" />
+              <circle cx="16" cy="12" r="1.5" fill="currentColor" />
+              <circle cx="10" cy="18" r="1.5" fill="currentColor" />
+            </svg>
+            Integrations
+          </Link>
+          <Link
             href="/skills"
             className={cn(
               "flex items-center gap-2 rounded-md px-3 py-2 text-sm",

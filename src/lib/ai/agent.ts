@@ -3,6 +3,7 @@ import { generateText, streamText, tool } from "ai";
 import { z } from "zod";
 import { skillRegistry } from "@/lib/skills/registry";
 import { memoryManager } from "@/lib/rag/memory";
+import { integrationRegistry } from "@/lib/integrations";
 import type { SkillContext, SkillResult } from "@/lib/skills/types";
 
 const SYSTEM_PROMPT = `You are OpenAssistant, a personal AI assistant with persistent memory and extensible skills.
@@ -17,20 +18,25 @@ You are modeled after the capabilities of OpenClaw — a proactive, autonomous p
 
 4. **Be direct and helpful**: Give concise, actionable responses. You're a teammate, not just a chatbot.
 
+5. **Use integrations**: You have access to connected integrations (chat platforms, smart home, music, etc.). Use them when the user asks to interact with those services.
+
 Guidelines:
 - At the start of each conversation, recall relevant memories about the user.
 - When the user shares preferences, facts about themselves, or important context, save it to memory.
 - When asked about past conversations or preferences, check your memory first.
 - Use web_search when you need current information.
 - Be transparent about what you remember and what you don't.
-- You may use multiple tools in sequence to accomplish complex tasks.`;
+- You may use multiple tools in sequence to accomplish complex tasks.
+- When using integrations (Telegram, Spotify, Hue, etc.), call the appropriate tool directly.`;
 
 /**
  * Build Zod schemas dynamically from skill parameters for the Vercel AI SDK.
+ * Includes both built-in skills and skills from connected integrations.
  */
 function buildTools(context: SkillContext) {
   const tools: Record<string, ReturnType<typeof tool>> = {};
 
+  // Register built-in skills
   for (const skill of skillRegistry.getAll()) {
     const shape: Record<string, z.ZodTypeAny> = {};
 
@@ -57,6 +63,36 @@ function buildTools(context: SkillContext) {
         return result;
       },
     });
+  }
+
+  // Register tools from connected integrations
+  for (const instance of integrationRegistry.getActiveInstances()) {
+    for (const integrationSkill of instance.definition.skills) {
+      const shape: Record<string, z.ZodTypeAny> = {};
+
+      for (const param of integrationSkill.parameters) {
+        let schema: z.ZodTypeAny;
+        switch (param.type) {
+          case "number":
+            schema = z.number().describe(param.description);
+            break;
+          case "boolean":
+            schema = z.boolean().describe(param.description);
+            break;
+          default:
+            schema = z.string().describe(param.description);
+        }
+        shape[param.name] = param.required ? schema : schema.optional();
+      }
+
+      tools[integrationSkill.id] = tool({
+        description: `[${instance.definition.name}] ${integrationSkill.description}`,
+        parameters: z.object(shape),
+        execute: async (args) => {
+          return instance.executeSkill(integrationSkill.id, args as Record<string, unknown>);
+        },
+      });
+    }
   }
 
   return tools;
