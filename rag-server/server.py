@@ -18,11 +18,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from config import (
+    AI_PROVIDER,
     LLM_MODEL,
     LLM_API_KEY,
     LLM_BASE_URL,
     EMBEDDING_MODEL,
     EMBEDDING_DIM,
+    EMBEDDING_API_KEY,
+    EMBEDDING_BASE_URL,
     HOST,
     PORT,
     API_KEY,
@@ -61,8 +64,8 @@ async def get_rag():
                 func=partial(
                     openai_embed.func,
                     model=EMBEDDING_MODEL,
-                    api_key=LLM_API_KEY,
-                    base_url=LLM_BASE_URL,
+                    api_key=EMBEDDING_API_KEY,
+                    base_url=EMBEDDING_BASE_URL,
                 ),
             ),
         )
@@ -393,6 +396,7 @@ async def graph_stats():
         return {
             "status": "ok",
             "working_dir": WORKING_DIR,
+            "provider": AI_PROVIDER,
             "model": LLM_MODEL,
             "embedding_model": EMBEDDING_MODEL,
         }
