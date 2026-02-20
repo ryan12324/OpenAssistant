@@ -3,7 +3,7 @@ import type {
   IntegrationInstance,
   IntegrationConfig,
   IntegrationStatus,
-} from "../types";
+} from "./types";
 
 /**
  * Base class for all integration instances.

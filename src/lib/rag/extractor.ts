@@ -91,9 +91,9 @@ function processResult(
     text: el.text || "",
   }));
 
-  const keywords = (result.keywords || []) as string[];
+  const keywords = (result.extractedKeywords || []).map((k) => k.text);
   const imageCount = result.images?.length || 0;
-  const warnings = (result.warnings || []) as string[];
+  const warnings = (result.processingWarnings || []).map((w) => `${w.source}: ${w.message}`);
 
   // Build enriched content for RAG ingestion
   let enriched = "";
@@ -162,7 +162,7 @@ export async function extractFromBuffer(
 ): Promise<ExtractedDocument> {
   const opts = { ...DEFAULT_OPTIONS, ...options };
   const config = buildConfig(opts);
-  const result = await extractBytes(buffer, mimeType || undefined, config);
+  const result = await extractBytes(buffer, mimeType || "application/octet-stream", config);
   return processResult(result, fileName);
 }
 

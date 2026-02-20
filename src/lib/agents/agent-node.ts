@@ -87,7 +87,7 @@ export class AgentNode {
 
       let fullOutput = "";
 
-      for await (const part of (await stream).textStream) {
+      for await (const part of stream.textStream) {
         fullOutput += part;
         yield {
           type: "agent_chunk",
@@ -163,7 +163,8 @@ export class AgentNode {
   }
 
   private buildTools(context: SkillContext) {
-    const tools: Record<string, ReturnType<typeof tool>> = {};
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const tools: Record<string, any> = {};
     const allowedSkills = this.persona.skillIds;
     const allowedIntegrations = this.persona.integrationIds;
 

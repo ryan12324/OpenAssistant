@@ -73,8 +73,7 @@ export async function POST(req: NextRequest) {
     });
 
     // Save assistant response after stream completes (non-blocking)
-    result.then(async (r) => {
-      const text = await r.text;
+    result.text.then(async (text) => {
       if (text) {
         await prisma.message.create({
           data: {

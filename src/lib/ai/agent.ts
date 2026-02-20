@@ -36,7 +36,8 @@ Guidelines:
  * Includes both built-in skills and skills from connected integrations.
  */
 function buildTools(context: SkillContext) {
-  const tools: Record<string, ReturnType<typeof tool>> = {};
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const tools: Record<string, any> = {};
 
   // Register built-in skills
   for (const skill of skillRegistry.getAll()) {
