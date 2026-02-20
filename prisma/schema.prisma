@@ -23,6 +23,7 @@ model User {
 
   // App-specific relations
   conversations Conversation[]
+  channelLinks  ChannelLink[]
   memories      Memory[]
   skillConfigs  SkillConfig[]
 }
@@ -75,20 +76,38 @@ model Conversation {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  userId   String
-  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  messages Message[]
+  userId       String
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages     Message[]
+  channelLinks ChannelLink[]
 }
 
 model Message {
   id        String   @id @default(cuid())
   role      String   // "user" | "assistant" | "system"
   content   String
+  source    String?  // "web" | "telegram" | "discord" | "slack" | ... (null = web)
   metadata  String?  // JSON string for tool calls, memory refs, etc.
   createdAt DateTime @default(now())
 
   conversationId String
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+}
+
+/// Maps external platform channels to internal conversations so inbound
+/// messages from different platforms share the same conversation context.
+model ChannelLink {
+  id             String   @id @default(cuid())
+  platform       String   // "telegram" | "discord" | "slack" | ...
+  externalId     String   // platform-specific chat/channel/thread ID
+  createdAt      DateTime @default(now())
+
+  userId         String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, platform, externalId])
 }
 
 model Memory {

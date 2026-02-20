@@ -6,14 +6,17 @@ import {
   processInboundAttachments,
   formatFileResults,
 } from "@/lib/integrations/chat/file-handler";
+import { resolveConversation, loadConversationHistory } from "@/lib/channels";
+import { generateAgentResponse } from "@/lib/ai/agent";
+import { memoryManager } from "@/lib/rag/memory";
 
 /**
  * POST /api/integrations/webhook
  *
  * Universal inbound webhook for chat integrations.
- * Receives messages (with optional file attachments) from external platforms
- * and processes them — downloading files, extracting content via kreuzberg,
- * and ingesting into the RAG knowledge graph.
+ * Receives messages (with optional file attachments) from external platforms,
+ * routes them through the AI agent pipeline (sharing context with all other
+ * channels), and returns the AI response so the caller can relay it back.
  *
  * Body shape:
  * {
@@ -22,6 +25,7 @@ import {
  *   senderId: string,
  *   senderName?: string,
  *   content: string,
+ *   externalChatId?: string, // platform chat/channel ID (for channel linking)
  *   attachments?: InboundAttachment[],
  *   metadata?: Record<string, unknown>,
  * }
@@ -36,6 +40,7 @@ export async function POST(req: NextRequest) {
       senderId,
       senderName,
       content,
+      externalChatId,
       attachments,
       metadata,
     } = body as {
@@ -44,6 +49,7 @@ export async function POST(req: NextRequest) {
       senderId: string;
       senderName?: string;
       content: string;
+      externalChatId?: string;
       attachments?: InboundAttachment[];
       metadata?: Record<string, unknown>;
     };
@@ -90,15 +96,12 @@ export async function POST(req: NextRequest) {
       return Response.json({ error: "Invalid webhook secret" }, { status: 403 });
     }
 
-    // Store the inbound message as a conversation message
     const userId = config.userId;
 
-    // Process file attachments if present
+    // ── Process file attachments (if any) ──────────────────────
     let fileResults;
     if (attachments && attachments.length > 0) {
-      // Determine auth headers for the source platform
       const platformHeaders = getPlatformHeaders(source, storedConfig);
-
       fileResults = await processInboundAttachments({
         attachments,
         headers: platformHeaders,
@@ -107,16 +110,102 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Build response summary
+    // ── Route text message through the AI pipeline ─────────────
+    let aiReply: string | undefined;
+    if (content) {
+      // Resolve (or create) a conversation for this platform channel.
+      // Uses externalChatId if provided, otherwise falls back to senderId
+      // so each unique sender/channel gets a stable conversation.
+      const chatId = externalChatId || senderId;
+      const conversationId = await resolveConversation({
+        userId,
+        platform: source,
+        externalId: chatId,
+        title: senderName
+          ? `${definition.name}: ${senderName}`
+          : `${definition.name} conversation`,
+      });
+
+      // Load existing conversation history for shared context
+      const history = await loadConversationHistory(conversationId);
+
+      // Save the inbound message
+      await prisma.message.create({
+        data: {
+          conversationId,
+          role: "user",
+          content,
+          source,
+          metadata: metadata ? JSON.stringify(metadata) : null,
+        },
+      });
+
+      // Recall memories for context
+      let memoryContext: string | undefined;
+      try {
+        const queryText = [...history.filter((m) => m.role === "user").map((m) => m.content).slice(-2), content].join(" ");
+        memoryContext = await memoryManager.recall({
+          userId,
+          query: queryText,
+          limit: 5,
+        });
+      } catch {
+        // Memory recall is best-effort
+      }
+
+      // Build message list: history + new message
+      const messages: { role: "user" | "assistant"; content: string }[] = [
+        ...history,
+        { role: "user", content },
+      ];
+
+      // Generate AI response (non-streaming for webhook)
+      aiReply = await generateAgentResponse({
+        messages,
+        userId,
+        conversationId,
+        memoryContext,
+      });
+
+      // Save the assistant response
+      if (aiReply) {
+        await prisma.message.create({
+          data: {
+            conversationId,
+            role: "assistant",
+            content: aiReply,
+            source,
+          },
+        });
+
+        // Auto-save short-term memory
+        try {
+          await memoryManager.store({
+            userId,
+            content: `User asked (via ${definition.name}): "${content.slice(0, 200)}"\nAssistant responded: ${aiReply.slice(0, 200)}`,
+            type: "short_term",
+          });
+        } catch {
+          // Best-effort
+        }
+      }
+    }
+
+    // ── Build response ─────────────────────────────────────────
     const response: {
       success: boolean;
       message: string;
+      reply?: string;
       filesProcessed?: number;
       fileSummary?: string;
     } = {
       success: true,
       message: `Received message from ${senderName || senderId} via ${definition.name}`,
     };
+
+    if (aiReply) {
+      response.reply = aiReply;
+    }
 
     if (fileResults) {
       response.filesProcessed = fileResults.filter((r) => r.success).length;
@@ -158,7 +247,6 @@ function getPlatformHeaders(
         ? { Authorization: `Bearer ${config.accessToken}` }
         : {};
     case "teams":
-      // Teams uses OAuth, the token would need to be refreshed
       return config.accessToken
         ? { Authorization: `Bearer ${config.accessToken}` }
         : {};

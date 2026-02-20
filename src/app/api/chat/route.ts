@@ -43,6 +43,7 @@ export async function POST(req: NextRequest) {
           conversationId: convId,
           role: "user",
           content: lastMessage.content,
+          source: "web",
         },
       });
     }
@@ -80,6 +81,7 @@ export async function POST(req: NextRequest) {
             conversationId: convId!,
             role: "assistant",
             content: text,
+            source: "web",
           },
         });
 

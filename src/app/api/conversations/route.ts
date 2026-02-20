@@ -13,6 +13,10 @@ export async function GET() {
         messages: {
           take: 1,
           orderBy: { createdAt: "desc" },
+          select: { id: true, role: true, content: true, source: true, createdAt: true },
+        },
+        channelLinks: {
+          select: { platform: true, externalId: true },
         },
       },
     });
