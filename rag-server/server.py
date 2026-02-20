@@ -41,8 +41,10 @@ async def get_rag():
         return rag_instance
 
     try:
+        from functools import partial
         from lightrag import LightRAG, QueryParam
         from lightrag.llm.openai import openai_complete, openai_embed
+        from lightrag.utils import EmbeddingFunc
 
         os.makedirs(WORKING_DIR, exist_ok=True)
 
@@ -54,13 +56,15 @@ async def get_rag():
                 "api_key": LLM_API_KEY,
                 "base_url": LLM_BASE_URL,
             },
-            embedding_func=openai_embed,
-            embedding_model_name=EMBEDDING_MODEL,
-            embedding_dim=EMBEDDING_DIM,
-            embedding_model_kwargs={
-                "api_key": LLM_API_KEY,
-                "base_url": LLM_BASE_URL,
-            },
+            embedding_func=EmbeddingFunc(
+                embedding_dim=EMBEDDING_DIM,
+                func=partial(
+                    openai_embed.func,
+                    model=EMBEDDING_MODEL,
+                    api_key=LLM_API_KEY,
+                    base_url=LLM_BASE_URL,
+                ),
+            ),
         )
         return rag_instance
     except ImportError:
