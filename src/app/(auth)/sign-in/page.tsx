@@ -26,7 +26,7 @@ export default function SignInPage() {
       if (result.error) {
         setError(result.error.message || "Failed to sign in");
       } else {
-        router.push("/chat");
+        router.push("/");
       }
     } catch {
       setError("An unexpected error occurred");

@@ -34,7 +34,7 @@ export default function SignUpPage() {
       if (result.error) {
         setError(result.error.message || "Failed to create account");
       } else {
-        router.push("/chat");
+        router.push("/");
       }
     } catch {
       setError("An unexpected error occurred");

@@ -37,7 +37,7 @@ export function Sidebar() {
       {/* Header */}
       <div className="flex items-center justify-between border-b border-border p-4">
         {!collapsed && (
-          <Link href="/chat" className="flex items-center gap-2">
+          <Link href="/" className="flex items-center gap-2">
             <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary text-sm font-bold text-primary-foreground">
               OA
             </div>
@@ -69,7 +69,7 @@ export function Sidebar() {
       {/* New Chat */}
       <div className="p-3">
         <Link
-          href="/chat"
+          href="/"
           className={cn(
             "flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm hover:bg-muted",
             collapsed && "justify-center px-2"
@@ -93,10 +93,10 @@ export function Sidebar() {
       {!collapsed && (
         <nav className="px-3 pb-2">
           <Link
-            href="/chat"
+            href="/"
             className={cn(
               "flex items-center gap-2 rounded-md px-3 py-2 text-sm",
-              pathname === "/chat"
+              pathname === "/"
                 ? "bg-muted text-foreground"
                 : "text-muted-foreground hover:bg-muted hover:text-foreground"
             )}
