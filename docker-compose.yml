@@ -10,7 +10,8 @@ services:
       - NODE_ENV=production
       - DATABASE_URL=file:/app/data/dev.db
       - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET}
-      - BETTER_AUTH_URL=http://localhost:3000
+      - BETTER_AUTH_URL=${SERVICE_URL_WEB:-http://localhost:3000}
+      - NEXT_PUBLIC_APP_URL=${SERVICE_URL_WEB:-http://localhost:3000}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - AI_PROVIDER=${AI_PROVIDER:-openai}
       - AI_MODEL=${AI_MODEL:-gpt-4o}
