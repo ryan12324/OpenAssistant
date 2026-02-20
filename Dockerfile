@@ -39,15 +39,26 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 # Copy Prisma schema + migrations for runtime
 COPY --from=builder /app/prisma ./prisma
 
+# Copy Prisma engine + CLI so we can run `prisma db push` at startup
+COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
+COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
+COPY --from=builder /app/node_modules/prisma ./node_modules/prisma
+
 # Copy kreuzberg native bindings (needed at runtime)
 COPY --from=builder /app/node_modules/@kreuzberg ./node_modules/@kreuzberg
 
+# Database directory (volume mount point) — must be writable by nextjs
+RUN mkdir -p /app/data && chown nextjs:nodejs /app/data
+
 # Uploads directory
 RUN mkdir -p .uploads && chown nextjs:nodejs .uploads
+
+# Entrypoint: run Prisma db push then start server
+COPY --chown=nextjs:nodejs docker-entrypoint.sh ./docker-entrypoint.sh
 
 USER nextjs
 EXPOSE 3000
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
 
-CMD ["node", "server.js"]
+CMD ["./docker-entrypoint.sh"]
