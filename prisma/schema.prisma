@@ -117,6 +117,7 @@ model AppSettings {
   mistralApiKey       String?
   xaiApiKey           String?
   deepseekApiKey      String?
+  moonshotApiKey      String?
   openrouterApiKey    String?
   perplexityApiKey    String?
   minimaxApiKey       String?

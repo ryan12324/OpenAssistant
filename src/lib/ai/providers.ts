@@ -13,6 +13,7 @@ export type AIProvider =
   | "mistral"
   | "xai"
   | "deepseek"
+  | "moonshot"
   | "openrouter"
   | "perplexity"
   | "ollama"
@@ -71,6 +72,11 @@ const PROVIDER_DEFAULTS: Record<
     baseUrl: "https://api.deepseek.com/v1",
     defaultModel: "deepseek-chat",
     envKey: "DEEPSEEK_API_KEY",
+  },
+  moonshot: {
+    baseUrl: "https://api.moonshot.cn/v1",
+    defaultModel: "kimi-2.5",
+    envKey: "MOONSHOT_API_KEY",
   },
   openrouter: {
     baseUrl: "https://openrouter.ai/api/v1",

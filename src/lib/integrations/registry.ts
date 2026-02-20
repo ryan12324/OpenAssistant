@@ -26,6 +26,7 @@ import { ollamaIntegration, OllamaInstance } from "./ai/ollama";
 import { openrouterIntegration, OpenRouterInstance } from "./ai/openrouter";
 import { mistralIntegration, MistralInstance } from "./ai/mistral";
 import { deepseekIntegration, DeepSeekInstance } from "./ai/deepseek";
+import { moonshotIntegration, MoonshotInstance } from "./ai/moonshot";
 import { xaiIntegration, XAIInstance } from "./ai/xai";
 import { perplexityIntegration, PerplexityInstance } from "./ai/perplexity";
 import { minimaxIntegration, MiniMaxInstance } from "./ai/minimax";
@@ -271,6 +272,7 @@ integrationRegistry.register(ollamaIntegration, OllamaInstance as unknown as Ins
 integrationRegistry.register(openrouterIntegration, OpenRouterInstance as unknown as InstanceConstructor);
 integrationRegistry.register(mistralIntegration, MistralInstance as unknown as InstanceConstructor);
 integrationRegistry.register(deepseekIntegration, DeepSeekInstance as unknown as InstanceConstructor);
+integrationRegistry.register(moonshotIntegration, MoonshotInstance as unknown as InstanceConstructor);
 integrationRegistry.register(xaiIntegration, XAIInstance as unknown as InstanceConstructor);
 integrationRegistry.register(perplexityIntegration, PerplexityInstance as unknown as InstanceConstructor);
 integrationRegistry.register(minimaxIntegration, MiniMaxInstance as unknown as InstanceConstructor);
