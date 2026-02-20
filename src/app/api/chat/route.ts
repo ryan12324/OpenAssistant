@@ -65,7 +65,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Stream the AI response
-    const result = streamAgentResponse({
+    const result = await streamAgentResponse({
       messages,
       userId,
       conversationId: convId,

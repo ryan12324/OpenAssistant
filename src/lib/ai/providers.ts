@@ -1,5 +1,6 @@
 import { createOpenAI } from "@ai-sdk/openai";
 import type { LanguageModelV1 } from "ai";
+import { getEffectiveAIConfig } from "@/lib/settings";
 
 /**
  * Supported AI provider identifiers.
@@ -167,6 +168,34 @@ export function resolveModelFromString(modelStr?: string): LanguageModelV1 {
   const envProvider = (process.env.AI_PROVIDER || "openai") as AIProvider;
   const envModel = process.env.AI_MODEL || PROVIDER_DEFAULTS[envProvider]?.defaultModel || "gpt-4o";
   return resolveModel({ provider: envProvider, model: envModel });
+}
+
+/**
+ * Resolve a model using DB-stored settings (with env fallback).
+ * This is the primary entry point — use this in all server-side code.
+ */
+export async function resolveModelFromSettings(): Promise<LanguageModelV1> {
+  const config = await getEffectiveAIConfig();
+
+  const modelStr = config.model || "";
+  if (modelStr) {
+    const { provider, model } = parseModelString(modelStr);
+    return resolveModel({
+      provider,
+      model,
+      apiKey: config.apiKey,
+      baseUrl: config.baseUrl || undefined,
+    });
+  }
+
+  const provider = (config.provider || "openai") as AIProvider;
+  const defaults = PROVIDER_DEFAULTS[provider];
+  return resolveModel({
+    provider,
+    model: defaults?.defaultModel || "gpt-4o",
+    apiKey: config.apiKey,
+    baseUrl: config.baseUrl || undefined,
+  });
 }
 
 /**

@@ -1,4 +1,5 @@
 import os
+import httpx
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -90,12 +91,11 @@ def _parse_model_string(model_str: str) -> tuple[str, str]:
     return "openai", model_str
 
 
-def _resolve_provider():
-    """Resolve LLM provider, model, API key, and base URL from env vars."""
+def _resolve_from_env():
+    """Resolve AI config from environment variables only."""
     ai_provider = os.getenv("AI_PROVIDER", "openai")
     ai_model = os.getenv("AI_MODEL", "")
 
-    # AI_MODEL can be "provider/model" format, which overrides AI_PROVIDER
     if ai_model and "/" in ai_model:
         provider, model = _parse_model_string(ai_model)
     else:
@@ -104,29 +104,76 @@ def _resolve_provider():
         model = ai_model or defaults["default_model"]
 
     defaults = PROVIDER_DEFAULTS.get(provider, PROVIDER_DEFAULTS["openai"])
-
-    # API key: check provider-specific env var
     env_key = defaults["env_key"]
     api_key = os.getenv(env_key, "") if env_key else ""
-
-    # Base URL: allow explicit override, otherwise use provider default
     base_url = os.getenv("OPENAI_BASE_URL", "") or defaults["base_url"]
 
-    return provider, model, api_key, base_url
+    embedding_model = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
+    embedding_api_key = os.getenv("EMBEDDING_API_KEY", "") or api_key
+    embedding_base_url = os.getenv("EMBEDDING_BASE_URL", "") or base_url
+
+    return provider, model, api_key, base_url, embedding_model, embedding_api_key, embedding_base_url
+
+
+def _fetch_from_web_app():
+    """
+    Fetch effective AI config from the Next.js web app's /api/settings/effective.
+    Returns None if the web app is unreachable.
+    """
+    web_url = os.getenv("WEB_APP_URL", "http://web:3000")
+    rag_key = os.getenv("RAG_API_KEY", "")
+    try:
+        headers = {}
+        if rag_key:
+            headers["Authorization"] = f"Bearer {rag_key}"
+        resp = httpx.get(f"{web_url}/api/settings/effective", headers=headers, timeout=5)
+        if resp.status_code == 200:
+            return resp.json()
+    except Exception as e:
+        print(f"INFO: Could not fetch config from web app ({e}), using env vars")
+    return None
+
+
+def _resolve_config():
+    """
+    Resolve AI config: try web app DB settings first, fall back to env vars.
+    """
+    remote = _fetch_from_web_app()
+    if remote:
+        provider = remote.get("provider", "openai")
+        model = remote.get("model", "")
+        api_key = remote.get("apiKey", "")
+        base_url = remote.get("baseUrl", "")
+
+        if not model:
+            defaults = PROVIDER_DEFAULTS.get(provider, PROVIDER_DEFAULTS["openai"])
+            model = defaults["default_model"]
+        if not base_url:
+            defaults = PROVIDER_DEFAULTS.get(provider, PROVIDER_DEFAULTS["openai"])
+            base_url = defaults["base_url"]
+
+        embedding_model = remote.get("embeddingModel", "text-embedding-3-small")
+        embedding_api_key = remote.get("embeddingApiKey", "") or api_key
+        embedding_base_url = remote.get("embeddingBaseUrl", "") or base_url
+
+        return provider, model, api_key, base_url, embedding_model, embedding_api_key, embedding_base_url
+
+    return _resolve_from_env()
 
 
 # ─── Resolved AI Configuration ──────────────────────────────────
 
-AI_PROVIDER, LLM_MODEL, LLM_API_KEY, LLM_BASE_URL = _resolve_provider()
+(
+    AI_PROVIDER,
+    LLM_MODEL,
+    LLM_API_KEY,
+    LLM_BASE_URL,
+    EMBEDDING_MODEL,
+    EMBEDDING_API_KEY,
+    EMBEDDING_BASE_URL,
+) = _resolve_config()
 
-# Embedding Configuration
-# Embedding always uses an OpenAI-compatible endpoint. For providers without
-# their own embedding API, configure EMBEDDING_BASE_URL to point at an
-# OpenAI-compatible embedding service (defaults to the LLM provider's URL).
-EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
 EMBEDDING_DIM = int(os.getenv("EMBEDDING_DIM", "1536"))
-EMBEDDING_API_KEY = os.getenv("EMBEDDING_API_KEY", "") or LLM_API_KEY
-EMBEDDING_BASE_URL = os.getenv("EMBEDDING_BASE_URL", "") or LLM_BASE_URL
 
 # Server Configuration
 HOST = os.getenv("RAG_HOST", "0.0.0.0")

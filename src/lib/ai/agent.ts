@@ -3,7 +3,7 @@ import { z } from "zod";
 import { skillRegistry } from "@/lib/skills/registry";
 import { memoryManager } from "@/lib/rag/memory";
 import { integrationRegistry } from "@/lib/integrations";
-import { resolveModelFromString } from "@/lib/ai/providers";
+import { resolveModelFromSettings } from "@/lib/ai/providers";
 import type { SkillContext, SkillResult } from "@/lib/skills/types";
 
 const SYSTEM_PROMPT = `You are OpenAssistant, a personal AI assistant with persistent memory and extensible skills.
@@ -104,7 +104,7 @@ function buildTools(context: SkillContext) {
 /**
  * Run the AI agent with streaming for a chat message.
  */
-export function streamAgentResponse(params: {
+export async function streamAgentResponse(params: {
   messages: { role: "user" | "assistant" | "system"; content: string }[];
   userId: string;
   conversationId: string;
@@ -129,7 +129,7 @@ export function streamAgentResponse(params: {
   const allMessages = [...systemMessages, ...params.messages];
 
   return streamText({
-    model: resolveModelFromString(process.env.AI_MODEL),
+    model: await resolveModelFromSettings(),
     messages: allMessages,
     tools: buildTools(context),
     maxSteps: 10,
@@ -164,7 +164,7 @@ export async function generateAgentResponse(params: {
   const allMessages = [...systemMessages, ...params.messages];
 
   const result = await generateText({
-    model: resolveModelFromString(process.env.AI_MODEL),
+    model: await resolveModelFromSettings(),
     messages: allMessages,
     tools: buildTools(context),
     maxSteps: 10,

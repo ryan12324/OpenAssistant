@@ -59,6 +59,8 @@ services:
       - EMBEDDING_MODEL=${EMBEDDING_MODEL:-text-embedding-3-small}
       - EMBEDDING_API_KEY=${EMBEDDING_API_KEY:-}
       - EMBEDDING_BASE_URL=${EMBEDDING_BASE_URL:-}
+      # Web app URL for fetching DB-stored settings
+      - WEB_APP_URL=http://web:3000
       # RAG server auth
       - RAG_API_KEY=${RAG_API_KEY}
     volumes:

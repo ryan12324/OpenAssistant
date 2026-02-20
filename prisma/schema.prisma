@@ -105,6 +105,34 @@ model Memory {
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
+model AppSettings {
+  id    String @id @default("singleton") // single-row table
+  // AI provider
+  aiProvider      String?  // "openai" | "anthropic" | ... (null = use env)
+  aiModel         String?  // "gpt-4o" | "anthropic/claude-..." (null = use env)
+  // Provider API keys (encrypted at rest is the caller's responsibility)
+  openaiApiKey        String?
+  anthropicApiKey     String?
+  googleAiApiKey      String?
+  mistralApiKey       String?
+  xaiApiKey           String?
+  deepseekApiKey      String?
+  openrouterApiKey    String?
+  perplexityApiKey    String?
+  minimaxApiKey       String?
+  glmApiKey           String?
+  huggingfaceApiKey   String?
+  vercelAiGatewayKey  String?
+  // Optional base URL override
+  openaiBaseUrl   String?
+  // Embedding overrides
+  embeddingModel   String?
+  embeddingApiKey  String?
+  embeddingBaseUrl String?
+  // Timestamps
+  updatedAt DateTime @updatedAt
+}
+
 model SkillConfig {
   id        String   @id @default(cuid())
   skillId   String
