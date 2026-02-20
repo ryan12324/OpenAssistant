@@ -81,16 +81,36 @@ export async function getEffectiveAIConfig() {
   const envKeyName = KEY_ENV_MAP[col as string] || "";
   const apiKey = dbKey || (envKeyName ? process.env[envKeyName] || "" : "");
 
-  // Embedding
+  // Embedding — resolve provider, then derive defaults from it
+  const embeddingProvider = s.embeddingProvider || process.env.EMBEDDING_PROVIDER || "";
   const embeddingModel = s.embeddingModel || process.env.EMBEDDING_MODEL || "text-embedding-3-small";
-  const embeddingApiKey = s.embeddingApiKey || process.env.EMBEDDING_API_KEY || apiKey;
-  const embeddingBaseUrl = s.embeddingBaseUrl || process.env.EMBEDDING_BASE_URL || baseUrl;
+
+  // If an embedding provider is set, resolve its API key and base URL independently
+  let embeddingApiKey = s.embeddingApiKey || process.env.EMBEDDING_API_KEY || "";
+  let embeddingBaseUrl = s.embeddingBaseUrl || process.env.EMBEDDING_BASE_URL || "";
+
+  if (embeddingProvider && embeddingProvider !== provider) {
+    // Resolve API key from the embedding provider's DB column / env var
+    if (!embeddingApiKey) {
+      const embCol = PROVIDER_KEY_COLUMN[embeddingProvider];
+      const embDbKey = embCol ? (s[embCol] as string | null) : null;
+      const embEnvKeyName = KEY_ENV_MAP[embCol as string] || "";
+      embeddingApiKey = embDbKey || (embEnvKeyName ? process.env[embEnvKeyName] || "" : "");
+    }
+    // embeddingBaseUrl is left empty here — the RAG server / provider resolver
+    // will fill it from PROVIDER_DEFAULTS using embeddingProvider
+  } else {
+    // Same provider — fall back to LLM provider's key and base URL
+    embeddingApiKey = embeddingApiKey || apiKey;
+    embeddingBaseUrl = embeddingBaseUrl || baseUrl;
+  }
 
   return {
     provider,
     model,
     apiKey,
     baseUrl,
+    embeddingProvider,
     embeddingModel,
     embeddingApiKey,
     embeddingBaseUrl,

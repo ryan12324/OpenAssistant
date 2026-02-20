@@ -37,6 +37,11 @@ PROVIDER_DEFAULTS = {
         "default_model": "deepseek-chat",
         "env_key": "DEEPSEEK_API_KEY",
     },
+    "moonshot": {
+        "base_url": "https://api.moonshot.cn/v1",
+        "default_model": "kimi-2.5",
+        "env_key": "MOONSHOT_API_KEY",
+    },
     "openrouter": {
         "base_url": "https://openrouter.ai/api/v1",
         "default_model": "openai/gpt-4o",
@@ -108,9 +113,18 @@ def _resolve_from_env():
     api_key = os.getenv(env_key, "") if env_key else ""
     base_url = os.getenv("OPENAI_BASE_URL", "") or defaults["base_url"]
 
+    embedding_provider = os.getenv("EMBEDDING_PROVIDER", "")
     embedding_model = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
-    embedding_api_key = os.getenv("EMBEDDING_API_KEY", "") or api_key
-    embedding_base_url = os.getenv("EMBEDDING_BASE_URL", "") or base_url
+    embedding_api_key = os.getenv("EMBEDDING_API_KEY", "")
+    embedding_base_url = os.getenv("EMBEDDING_BASE_URL", "")
+
+    if embedding_provider and embedding_provider != provider:
+        emb_defaults = PROVIDER_DEFAULTS.get(embedding_provider, PROVIDER_DEFAULTS["openai"])
+        embedding_api_key = embedding_api_key or (os.getenv(emb_defaults["env_key"], "") if emb_defaults["env_key"] else "")
+        embedding_base_url = embedding_base_url or emb_defaults["base_url"]
+    else:
+        embedding_api_key = embedding_api_key or api_key
+        embedding_base_url = embedding_base_url or base_url
 
     return provider, model, api_key, base_url, embedding_model, embedding_api_key, embedding_base_url
 
@@ -152,9 +166,18 @@ def _resolve_config():
             defaults = PROVIDER_DEFAULTS.get(provider, PROVIDER_DEFAULTS["openai"])
             base_url = defaults["base_url"]
 
+        embedding_provider = remote.get("embeddingProvider", "")
         embedding_model = remote.get("embeddingModel", "text-embedding-3-small")
-        embedding_api_key = remote.get("embeddingApiKey", "") or api_key
-        embedding_base_url = remote.get("embeddingBaseUrl", "") or base_url
+        embedding_api_key = remote.get("embeddingApiKey", "")
+        embedding_base_url = remote.get("embeddingBaseUrl", "")
+
+        if embedding_provider and embedding_provider != provider:
+            emb_defaults = PROVIDER_DEFAULTS.get(embedding_provider, PROVIDER_DEFAULTS["openai"])
+            embedding_api_key = embedding_api_key or (os.getenv(emb_defaults["env_key"], "") if emb_defaults["env_key"] else "")
+            embedding_base_url = embedding_base_url or emb_defaults["base_url"]
+        else:
+            embedding_api_key = embedding_api_key or api_key
+            embedding_base_url = embedding_base_url or base_url
 
         return provider, model, api_key, base_url, embedding_model, embedding_api_key, embedding_base_url
 

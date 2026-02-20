@@ -57,6 +57,7 @@ services:
       - HUGGINGFACE_API_KEY=${HUGGINGFACE_API_KEY:-}
       - VERCEL_AI_GATEWAY_KEY=${VERCEL_AI_GATEWAY_KEY:-}
       # Embedding (optional override, defaults to LLM provider)
+      - EMBEDDING_PROVIDER=${EMBEDDING_PROVIDER:-}
       - EMBEDDING_MODEL=${EMBEDDING_MODEL:-text-embedding-3-small}
       - EMBEDDING_API_KEY=${EMBEDDING_API_KEY:-}
       - EMBEDDING_BASE_URL=${EMBEDDING_BASE_URL:-}

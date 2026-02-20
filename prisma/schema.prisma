@@ -127,9 +127,10 @@ model AppSettings {
   // Optional base URL override
   openaiBaseUrl   String?
   // Embedding overrides
-  embeddingModel   String?
-  embeddingApiKey  String?
-  embeddingBaseUrl String?
+  embeddingProvider String?  // "openai" | "anthropic" | ... (null = same as LLM provider)
+  embeddingModel    String?
+  embeddingApiKey   String?
+  embeddingBaseUrl  String?
   // Timestamps
   updatedAt DateTime @updatedAt
 }
