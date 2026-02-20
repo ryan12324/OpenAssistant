@@ -22,6 +22,11 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN npx prisma generate
 RUN npm run build
 
+# ─── Prisma CLI (isolated install with all transitive deps) ──
+FROM base AS prisma-cli
+WORKDIR /prisma-cli
+RUN npm init -y && npm install prisma@^6.3.0 --save-exact
+
 # ─── Production ──────────────────────────────────────────────
 FROM base AS runner
 WORKDIR /app
@@ -39,10 +44,8 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 # Copy Prisma schema + migrations for runtime
 COPY --from=builder /app/prisma ./prisma
 
-# Copy Prisma engine + CLI so we can run `prisma db push` at startup
-COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
-COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
-COPY --from=builder /app/node_modules/prisma ./node_modules/prisma
+# Copy Prisma CLI with all transitive deps (for `prisma db push` at startup)
+COPY --from=prisma-cli /prisma-cli/node_modules ./node_modules/.prisma-cli
 
 # Copy kreuzberg native bindings (needed at runtime)
 COPY --from=builder /app/node_modules/@kreuzberg ./node_modules/@kreuzberg
