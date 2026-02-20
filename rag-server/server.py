@@ -160,7 +160,10 @@ async def verify_api_key(authorization: Optional[str] = Header(None)):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize RAG on startup."""
-    await get_rag()
+    try:
+        await get_rag()
+    except Exception as e:
+        print(f"WARNING: RAG initialization failed: {e}")
     yield
     # Cleanup
     global rag_instance
