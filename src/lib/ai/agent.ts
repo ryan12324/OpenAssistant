@@ -68,8 +68,8 @@ function buildTools(context: SkillContext) {
     });
   }
 
-  // Register tools from connected integrations
-  for (const instance of integrationRegistry.getActiveInstances()) {
+  // Register tools from connected integrations (user-scoped)
+  for (const instance of integrationRegistry.getActiveInstancesForUser(context.userId)) {
     for (const integrationSkill of instance.definition.skills) {
       const shape: Record<string, z.ZodTypeAny> = {};
 
@@ -115,6 +115,9 @@ export async function streamAgentResponse(params: {
     conversationId: params.conversationId,
   };
 
+  // Hydrate user's enabled integrations from DB so their tools are available
+  await integrationRegistry.hydrateUserIntegrations(params.userId);
+
   const systemMessages: { role: "system"; content: string }[] = [
     { role: "system", content: SYSTEM_PROMPT },
   ];
@@ -149,6 +152,9 @@ export async function generateAgentResponse(params: {
     userId: params.userId,
     conversationId: params.conversationId,
   };
+
+  // Hydrate user's enabled integrations from DB so their tools are available
+  await integrationRegistry.hydrateUserIntegrations(params.userId);
 
   const systemMessages: { role: "system"; content: string }[] = [
     { role: "system", content: SYSTEM_PROMPT },

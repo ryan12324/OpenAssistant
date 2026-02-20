@@ -88,10 +88,14 @@ export async function POST(req: NextRequest) {
       },
     });
 
+    // Invalidate hydration cache so integration changes take effect immediately
+    integrationRegistry.invalidateUser(session.user.id);
+
     // If enabling, try to connect
     if (enabled && config) {
       try {
-        const instance = await integrationRegistry.createInstance(
+        const instance = await integrationRegistry.createUserInstance(
+          session.user.id,
           integrationId,
           config as Record<string, string>
         );

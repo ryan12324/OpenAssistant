@@ -200,8 +200,8 @@ export class AgentNode {
       });
     }
 
-    // Add integration skills (filtered if specified)
-    for (const instance of integrationRegistry.getActiveInstances()) {
+    // Add integration skills (filtered if specified, user-scoped)
+    for (const instance of integrationRegistry.getActiveInstancesForUser(context.userId)) {
       if (
         allowedIntegrations &&
         allowedIntegrations.length > 0 &&
