@@ -116,4 +116,72 @@ export const ingestDocument: SkillDefinition = {
   },
 };
 
-export const memorySkills = [saveMemory, recallMemory, ingestDocument];
+export const ingestFile: SkillDefinition = {
+  id: "ingest_file",
+  name: "Ingest File",
+  description:
+    "Extract content from an uploaded file (PDF, DOCX, images, spreadsheets, and 75+ formats) using kreuzberg-node and ingest it into the knowledge base. The file must already be uploaded via the /api/files/upload endpoint.",
+  category: "memory",
+  parameters: [
+    {
+      name: "file_path",
+      type: "string",
+      description: "Server-side path to the uploaded file",
+      required: true,
+    },
+    {
+      name: "title",
+      type: "string",
+      description: "Title or label for the document",
+    },
+    {
+      name: "enable_ocr",
+      type: "boolean",
+      description: "Enable OCR for scanned documents and images (default: true)",
+    },
+  ],
+  async execute(args, context) {
+    const { docId, extracted } = await memoryManager.ingestFile({
+      userId: context.userId,
+      filePath: args.file_path as string,
+      title: args.title as string | undefined,
+      extractOptions: {
+        enableOcr: args.enable_ocr !== false,
+      },
+    });
+
+    const summary = [
+      `File ingested into knowledge base (ID: ${docId}).`,
+      `Type: ${extracted.mimeType}`,
+      `Content: ${extracted.content.length} characters`,
+      extracted.tables.length > 0 ? `Tables: ${extracted.tables.length}` : null,
+      extracted.imageCount > 0 ? `Images: ${extracted.imageCount}` : null,
+      extracted.keywords.length > 0
+        ? `Keywords: ${extracted.keywords.slice(0, 10).join(", ")}`
+        : null,
+      extracted.qualityScore != null
+        ? `Quality: ${(extracted.qualityScore * 100).toFixed(0)}%`
+        : null,
+      extracted.warnings.length > 0
+        ? `Warnings: ${extracted.warnings.join("; ")}`
+        : null,
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    return {
+      success: true,
+      output: summary,
+      data: {
+        docId,
+        mimeType: extracted.mimeType,
+        contentLength: extracted.content.length,
+        tables: extracted.tables.length,
+        images: extracted.imageCount,
+        keywords: extracted.keywords,
+      },
+    };
+  },
+};
+
+export const memorySkills = [saveMemory, recallMemory, ingestDocument, ingestFile];

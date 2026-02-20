@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
 
 interface Memory {
@@ -14,6 +14,151 @@ interface Memory {
 }
 
 type MemoryFilter = "all" | "short_term" | "long_term" | "episodic";
+
+interface FileUploadResult {
+  fileName: string;
+  status: "uploading" | "done" | "error";
+  error?: string;
+  contentLength?: number;
+  tables?: number;
+  images?: number;
+  keywords?: string[];
+}
+
+function FileUploadSection({ onUploaded }: { onUploaded: () => void }) {
+  const [uploads, setUploads] = useState<FileUploadResult[]>([]);
+  const [dragOver, setDragOver] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  async function handleFiles(fileList: FileList) {
+    for (const file of Array.from(fileList)) {
+      setUploads((prev) => [
+        ...prev,
+        { fileName: file.name, status: "uploading" },
+      ]);
+
+      try {
+        const formData = new FormData();
+        formData.append("file", file);
+        formData.append("title", file.name);
+
+        const res = await fetch("/api/files/upload", {
+          method: "POST",
+          body: formData,
+        });
+
+        const data = await res.json();
+
+        if (!res.ok) {
+          setUploads((prev) =>
+            prev.map((u) =>
+              u.fileName === file.name && u.status === "uploading"
+                ? { ...u, status: "error", error: data.error }
+                : u
+            )
+          );
+          continue;
+        }
+
+        setUploads((prev) =>
+          prev.map((u) =>
+            u.fileName === file.name && u.status === "uploading"
+              ? {
+                  ...u,
+                  status: "done",
+                  contentLength: data.contentLength,
+                  tables: data.tables,
+                  images: data.images,
+                  keywords: data.keywords,
+                }
+              : u
+          )
+        );
+        onUploaded();
+      } catch {
+        setUploads((prev) =>
+          prev.map((u) =>
+            u.fileName === file.name && u.status === "uploading"
+              ? { ...u, status: "error", error: "Upload failed" }
+              : u
+          )
+        );
+      }
+    }
+  }
+
+  return (
+    <div
+      className={cn(
+        "rounded-lg border-2 border-dashed bg-card p-4 transition-colors",
+        dragOver ? "border-primary bg-primary/5" : "border-border"
+      )}
+      onDrop={(e) => {
+        e.preventDefault();
+        setDragOver(false);
+        if (e.dataTransfer.files.length > 0) handleFiles(e.dataTransfer.files);
+      }}
+      onDragOver={(e) => {
+        e.preventDefault();
+        setDragOver(true);
+      }}
+      onDragLeave={() => setDragOver(false)}
+    >
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-sm font-medium">Ingest Files</h2>
+          <p className="text-xs text-muted-foreground">
+            Drop files here or click to upload. Supports PDF, DOCX, XLSX, images (OCR), and 75+ formats.
+          </p>
+        </div>
+        <button
+          onClick={() => fileRef.current?.click()}
+          className="shrink-0 rounded-md bg-muted px-4 py-1.5 text-sm font-medium text-foreground hover:bg-muted/80"
+        >
+          Choose Files
+        </button>
+        <input
+          ref={fileRef}
+          type="file"
+          multiple
+          onChange={(e) => {
+            if (e.target.files) handleFiles(e.target.files);
+            e.target.value = "";
+          }}
+          className="hidden"
+        />
+      </div>
+
+      {uploads.length > 0 && (
+        <div className="mt-3 space-y-2">
+          {uploads.map((u, i) => (
+            <div
+              key={`${u.fileName}-${i}`}
+              className="flex items-center justify-between rounded-md border border-border bg-background px-3 py-2 text-xs"
+            >
+              <span className="truncate">{u.fileName}</span>
+              {u.status === "uploading" && (
+                <span className="animate-pulse text-muted-foreground">
+                  Processing...
+                </span>
+              )}
+              {u.status === "error" && (
+                <span className="text-red-400">{u.error}</span>
+              )}
+              {u.status === "done" && (
+                <span className="text-green-400">
+                  {((u.contentLength || 0) / 1000).toFixed(0)}k chars
+                  {u.tables ? `, ${u.tables} tables` : ""}
+                  {u.images ? `, ${u.images} images` : ""}
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function MemoryPage() {
   const [memories, setMemories] = useState<Memory[]>([]);
@@ -86,7 +231,8 @@ export default function MemoryPage() {
       <div className="border-b border-border px-6 py-4">
         <h1 className="text-lg font-semibold">Memory</h1>
         <p className="text-sm text-muted-foreground">
-          Your assistant&apos;s persistent knowledge graph — {total} memories stored
+          Your assistant&apos;s persistent knowledge graph — {total} memories stored.
+          Upload files (PDF, DOCX, images, and 75+ formats) to add to the knowledge base.
         </p>
       </div>
 
@@ -120,6 +266,9 @@ export default function MemoryPage() {
               </button>
             </div>
           </div>
+
+          {/* File Upload */}
+          <FileUploadSection onUploaded={loadMemories} />
 
           {/* Filters */}
           <div className="flex gap-2">

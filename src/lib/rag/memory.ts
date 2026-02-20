@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { ragClient } from "./client";
+import { extractFromFile, extractFromBuffer, type ExtractedDocument, type ExtractOptions } from "./extractor";
 import type { MemoryType } from "./types";
 
 /**
@@ -181,5 +182,101 @@ export const memoryManager = {
       },
     });
     return result.doc_id;
+  },
+
+  /**
+   * Extract content from a file on disk using kreuzberg-node, then ingest
+   * the enriched content into the RAG knowledge graph.
+   */
+  async ingestFile(params: {
+    userId: string;
+    filePath: string;
+    title?: string;
+    extractOptions?: ExtractOptions;
+  }): Promise<{ docId: string; extracted: ExtractedDocument }> {
+    const extracted = await extractFromFile(params.filePath, params.extractOptions);
+    const title = params.title || params.filePath.split("/").pop() || "Untitled";
+
+    const result = await ragClient.ingest({
+      content: extracted.enrichedContent,
+      metadata: {
+        user_id: params.userId,
+        title,
+        mime_type: extracted.mimeType,
+        tables_count: String(extracted.tables.length),
+        image_count: String(extracted.imageCount),
+        ...(extracted.keywords.length > 0
+          ? { keywords: extracted.keywords.join(", ") }
+          : {}),
+        ...(extracted.qualityScore != null
+          ? { quality_score: String(extracted.qualityScore) }
+          : {}),
+      },
+    });
+
+    // Also store a memory record for the file ingestion
+    await prisma.memory.create({
+      data: {
+        userId: params.userId,
+        type: "long_term",
+        content: `Ingested document: ${title} (${extracted.mimeType}, ${extracted.content.length} chars, ${extracted.tables.length} tables, ${extracted.imageCount} images)`,
+        summary: `Document "${title}" was added to the knowledge base.`,
+        ragDocId: result.doc_id,
+        tags: JSON.stringify(["document", "ingested", ...extracted.keywords.slice(0, 5)]),
+      },
+    });
+
+    return { docId: result.doc_id, extracted };
+  },
+
+  /**
+   * Extract content from a file buffer (e.g., uploaded file) using kreuzberg-node,
+   * then ingest the enriched content into the RAG knowledge graph.
+   */
+  async ingestFileBuffer(params: {
+    userId: string;
+    buffer: Buffer;
+    fileName: string;
+    mimeType?: string;
+    extractOptions?: ExtractOptions;
+  }): Promise<{ docId: string; extracted: ExtractedDocument }> {
+    const extracted = await extractFromBuffer(
+      params.buffer,
+      params.mimeType,
+      params.fileName,
+      params.extractOptions,
+    );
+    const title = params.fileName;
+
+    const result = await ragClient.ingest({
+      content: extracted.enrichedContent,
+      metadata: {
+        user_id: params.userId,
+        title,
+        mime_type: extracted.mimeType,
+        tables_count: String(extracted.tables.length),
+        image_count: String(extracted.imageCount),
+        ...(extracted.keywords.length > 0
+          ? { keywords: extracted.keywords.join(", ") }
+          : {}),
+        ...(extracted.qualityScore != null
+          ? { quality_score: String(extracted.qualityScore) }
+          : {}),
+      },
+    });
+
+    // Also store a memory record for the file ingestion
+    await prisma.memory.create({
+      data: {
+        userId: params.userId,
+        type: "long_term",
+        content: `Ingested document: ${title} (${extracted.mimeType}, ${extracted.content.length} chars, ${extracted.tables.length} tables, ${extracted.imageCount} images)`,
+        summary: `Document "${title}" was added to the knowledge base.`,
+        ragDocId: result.doc_id,
+        tags: JSON.stringify(["document", "ingested", ...extracted.keywords.slice(0, 5)]),
+      },
+    });
+
+    return { docId: result.doc_id, extracted };
   },
 };

@@ -54,6 +54,9 @@ build/
 rag-server/data/
 rag-server/rag_storage/
 
+# Uploads (temporary)
+.uploads/
+
 # IDE
 .idea/
 .vscode/
