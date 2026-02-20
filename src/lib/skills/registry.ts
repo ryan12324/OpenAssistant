@@ -2,6 +2,7 @@ import type { SkillDefinition } from "./types";
 import { memorySkills } from "./builtin/memory-skills";
 import { webSkills } from "./builtin/web-skills";
 import { productivitySkills } from "./builtin/productivity-skills";
+import { agentSkills } from "./builtin/agent-skills";
 
 class SkillRegistry {
   private skills: Map<string, SkillDefinition> = new Map();
@@ -11,6 +12,7 @@ class SkillRegistry {
     this.registerMany(memorySkills);
     this.registerMany(webSkills);
     this.registerMany(productivitySkills);
+    this.registerMany(agentSkills);
   }
 
   register(skill: SkillDefinition): void {
