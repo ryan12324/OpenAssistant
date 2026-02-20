@@ -1,5 +1,6 @@
 import type { IntegrationDefinition, IntegrationConfig } from "../types";
 import { BaseIntegration } from "../base";
+import { downloadAndIngestFile, formatFileResults } from "./file-handler";
 
 interface TeamsConfig extends IntegrationConfig {
   appId: string;
@@ -49,6 +50,16 @@ export const teamsIntegration: IntegrationDefinition<TeamsConfig> = {
         { name: "text", type: "string", description: "Message text", required: true },
       ],
     },
+    {
+      id: "teams_download_file",
+      name: "Download Teams Attachment",
+      description: "Download a file attachment from a Teams message and ingest it into the knowledge base",
+      parameters: [
+        { name: "content_url", type: "string", description: "Direct download URL of the Teams attachment", required: true },
+        { name: "file_name", type: "string", description: "Original file name", required: true },
+        { name: "user_id", type: "string", description: "User ID for RAG ownership", required: true },
+      ],
+    },
   ],
 };
 
@@ -89,6 +100,22 @@ export class TeamsInstance extends BaseIntegration<TeamsConfig> {
           success: true,
           output: "Message sent to Teams",
           data: { conversation_id: args.conversation_id },
+        };
+      }
+      case "teams_download_file": {
+        // Teams attachments use Bot Framework OAuth for auth
+        const result = await downloadAndIngestFile({
+          url: args.content_url as string,
+          fileName: args.file_name as string,
+          headers: { Authorization: `Bearer ${this.accessToken}` },
+          userId: args.user_id as string,
+          source: "Teams",
+        });
+
+        return {
+          success: result.success,
+          output: formatFileResults([result]),
+          data: result,
         };
       }
       default:

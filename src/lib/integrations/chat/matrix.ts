@@ -1,5 +1,6 @@
 import type { IntegrationDefinition, IntegrationConfig } from "../types";
 import { BaseIntegration } from "../base";
+import { downloadAndIngestFile, formatFileResults } from "./file-handler";
 
 interface MatrixConfig extends IntegrationConfig {
   homeserverUrl: string;
@@ -57,6 +58,16 @@ export const matrixIntegration: IntegrationDefinition<MatrixConfig> = {
       description: "List joined Matrix rooms",
       parameters: [],
     },
+    {
+      id: "matrix_download_file",
+      name: "Download Matrix File",
+      description: "Download a file from a Matrix message and ingest it into the knowledge base",
+      parameters: [
+        { name: "mxc_url", type: "string", description: "Matrix content URI (mxc://server/media_id)", required: true },
+        { name: "file_name", type: "string", description: "Original file name", required: true },
+        { name: "user_id", type: "string", description: "User ID for RAG ownership", required: true },
+      ],
+    },
   ],
 };
 
@@ -104,6 +115,31 @@ export class MatrixInstance extends BaseIntegration<MatrixConfig> {
         return {
           success: true,
           output: `Joined rooms:\n${result.joined_rooms.join("\n")}`,
+          data: result,
+        };
+      }
+      case "matrix_download_file": {
+        // Parse mxc:// URL into server_name and media_id
+        const mxcUrl = args.mxc_url as string;
+        const mxcMatch = mxcUrl.match(/^mxc:\/\/([^/]+)\/(.+)$/);
+        if (!mxcMatch) {
+          return { success: false, output: "Invalid mxc:// URL format" };
+        }
+
+        const [, serverName, mediaId] = mxcMatch;
+        const downloadUrl = `${this.config.homeserverUrl}/_matrix/media/v3/download/${serverName}/${mediaId}`;
+
+        const result = await downloadAndIngestFile({
+          url: downloadUrl,
+          fileName: args.file_name as string,
+          headers: { Authorization: `Bearer ${this.config.accessToken}` },
+          userId: args.user_id as string,
+          source: "Matrix",
+        });
+
+        return {
+          success: result.success,
+          output: formatFileResults([result]),
           data: result,
         };
       }

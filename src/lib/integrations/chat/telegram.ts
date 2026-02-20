@@ -1,5 +1,6 @@
 import type { IntegrationDefinition, IntegrationConfig, IntegrationStatus } from "../types";
 import { BaseIntegration } from "../base";
+import { downloadAndIngestFile, formatFileResults } from "./file-handler";
 
 interface TelegramConfig extends IntegrationConfig {
   botToken: string;
@@ -50,6 +51,16 @@ export const telegramIntegration: IntegrationDefinition<TelegramConfig> = {
         { name: "chat_id", type: "string", description: "Telegram chat ID", required: true },
         { name: "photo_url", type: "string", description: "URL of the photo to send", required: true },
         { name: "caption", type: "string", description: "Photo caption" },
+      ],
+    },
+    {
+      id: "telegram_download_file",
+      name: "Download Telegram File",
+      description: "Download a file from Telegram and ingest it into the knowledge base via RAG",
+      parameters: [
+        { name: "file_id", type: "string", description: "Telegram file_id from a message attachment", required: true },
+        { name: "file_name", type: "string", description: "Original file name", required: true },
+        { name: "user_id", type: "string", description: "User ID for RAG ownership", required: true },
       ],
     },
   ],
@@ -103,6 +114,35 @@ export class TelegramInstance extends BaseIntegration<TelegramConfig> {
           }),
         });
         return { success: true, output: "Photo sent successfully", data: result };
+      }
+      case "telegram_download_file": {
+        // Step 1: Get file path from Telegram API
+        const fileInfo = await this.apiFetch<{
+          ok: boolean;
+          result: { file_id: string; file_path: string; file_size?: number };
+        }>(`${baseUrl}/getFile`, {
+          method: "POST",
+          body: JSON.stringify({ file_id: args.file_id }),
+        });
+
+        if (!fileInfo.ok || !fileInfo.result.file_path) {
+          return { success: false, output: "Failed to get file info from Telegram" };
+        }
+
+        // Step 2: Download and ingest via shared handler
+        const downloadUrl = `https://api.telegram.org/file/bot${this.config.botToken}/${fileInfo.result.file_path}`;
+        const result = await downloadAndIngestFile({
+          url: downloadUrl,
+          fileName: args.file_name as string,
+          userId: args.user_id as string,
+          source: "Telegram",
+        });
+
+        return {
+          success: result.success,
+          output: formatFileResults([result]),
+          data: result,
+        };
       }
       default:
         return { success: false, output: `Unknown skill: ${skillId}` };

@@ -1,5 +1,6 @@
 import type { IntegrationDefinition, IntegrationConfig } from "../types";
 import { BaseIntegration } from "../base";
+import { downloadAndIngestFile, formatFileResults } from "./file-handler";
 
 interface SlackConfig extends IntegrationConfig {
   botToken: string;
@@ -64,6 +65,15 @@ export const slackIntegration: IntegrationDefinition<SlackConfig> = {
       parameters: [
         { name: "text", type: "string", description: "Status text", required: true },
         { name: "emoji", type: "string", description: "Status emoji (e.g., :robot_face:)" },
+      ],
+    },
+    {
+      id: "slack_download_file",
+      name: "Download Slack File",
+      description: "Download a shared file from Slack and ingest it into the knowledge base",
+      parameters: [
+        { name: "file_id", type: "string", description: "Slack file ID (e.g., F0123456789)", required: true },
+        { name: "user_id", type: "string", description: "User ID for RAG ownership", required: true },
       ],
     },
   ],
@@ -134,6 +144,43 @@ export class SlackInstance extends BaseIntegration<SlackConfig> {
           }
         );
         return { success: result.ok, output: "Status updated", data: result };
+      }
+      case "slack_download_file": {
+        // Step 1: Get file info from Slack API
+        const fileInfo = await this.apiFetch<{
+          ok: boolean;
+          file: {
+            id: string;
+            name: string;
+            mimetype: string;
+            size: number;
+            url_private_download: string;
+          };
+        }>(`${this.API}/files.info`, {
+          method: "POST",
+          headers: this.headers,
+          body: JSON.stringify({ file: args.file_id }),
+        });
+
+        if (!fileInfo.ok || !fileInfo.file.url_private_download) {
+          return { success: false, output: "Failed to get file info from Slack" };
+        }
+
+        // Step 2: Download with auth and ingest
+        const result = await downloadAndIngestFile({
+          url: fileInfo.file.url_private_download,
+          fileName: fileInfo.file.name,
+          mimeType: fileInfo.file.mimetype,
+          headers: { Authorization: `Bearer ${this.config.botToken}` },
+          userId: args.user_id as string,
+          source: "Slack",
+        });
+
+        return {
+          success: result.success,
+          output: formatFileResults([result]),
+          data: result,
+        };
       }
       default:
         return { success: false, output: `Unknown skill: ${skillId}` };

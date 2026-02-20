@@ -1,5 +1,6 @@
 import type { IntegrationDefinition, IntegrationConfig } from "../types";
 import { BaseIntegration } from "../base";
+import { downloadAndIngestFile, formatFileResults } from "./file-handler";
 
 interface WhatsAppConfig extends IntegrationConfig {
   mode: string; // "baileys" | "cloud_api"
@@ -54,6 +55,17 @@ export const whatsappIntegration: IntegrationDefinition<WhatsAppConfig> = {
         { name: "text", type: "string", description: "Message text", required: true },
       ],
     },
+    {
+      id: "whatsapp_download_media",
+      name: "Download WhatsApp Media",
+      description: "Download a media file from WhatsApp and ingest it into the knowledge base",
+      parameters: [
+        { name: "media_id", type: "string", description: "WhatsApp media ID from the message", required: true },
+        { name: "file_name", type: "string", description: "File name to save as", required: true },
+        { name: "mime_type", type: "string", description: "MIME type of the media" },
+        { name: "user_id", type: "string", description: "User ID for RAG ownership", required: true },
+      ],
+    },
   ],
 };
 
@@ -96,6 +108,39 @@ export class WhatsAppInstance extends BaseIntegration<WhatsAppConfig> {
         }
         // Baileys mode would use the local WebSocket connection
         return { success: true, output: "WhatsApp message sent via Baileys" };
+      }
+      case "whatsapp_download_media": {
+        if (this.config.mode !== "cloud_api") {
+          return { success: false, output: "Media download requires Cloud API mode" };
+        }
+
+        // Step 1: Get media URL from WhatsApp Cloud API
+        const mediaInfo = await this.apiFetch<{ url: string; mime_type: string }>(
+          `https://graph.facebook.com/v21.0/${args.media_id}`,
+          {
+            headers: { Authorization: `Bearer ${this.config.accessToken}` },
+          }
+        );
+
+        if (!mediaInfo.url) {
+          return { success: false, output: "Failed to get media URL from WhatsApp" };
+        }
+
+        // Step 2: Download with auth and ingest
+        const result = await downloadAndIngestFile({
+          url: mediaInfo.url,
+          fileName: args.file_name as string,
+          mimeType: (args.mime_type as string) || mediaInfo.mime_type,
+          headers: { Authorization: `Bearer ${this.config.accessToken}` },
+          userId: args.user_id as string,
+          source: "WhatsApp",
+        });
+
+        return {
+          success: result.success,
+          output: formatFileResults([result]),
+          data: result,
+        };
       }
       default:
         return { success: false, output: `Unknown skill: ${skillId}` };

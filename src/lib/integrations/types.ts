@@ -92,12 +92,27 @@ export interface IntegrationInstance<
   handleInbound?(message: InboundMessage): Promise<void>;
 }
 
+export interface InboundAttachment {
+  /** Unique file ID on the source platform */
+  fileId: string;
+  /** Original file name */
+  fileName: string;
+  /** MIME type if known */
+  mimeType?: string;
+  /** File size in bytes if known */
+  size?: number;
+  /** Direct download URL (may require auth) */
+  url?: string;
+}
+
 export interface InboundMessage {
   source: string;
   senderId: string;
   senderName?: string;
   content: string;
   timestamp: Date;
+  /** File attachments from the message */
+  attachments?: InboundAttachment[];
   metadata?: Record<string, unknown>;
 }
 

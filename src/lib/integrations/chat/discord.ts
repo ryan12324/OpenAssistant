@@ -1,5 +1,6 @@
 import type { IntegrationDefinition, IntegrationConfig } from "../types";
 import { BaseIntegration } from "../base";
+import { downloadAndIngestFile, formatFileResults } from "./file-handler";
 
 interface DiscordConfig extends IntegrationConfig {
   botToken: string;
@@ -49,6 +50,16 @@ export const discordIntegration: IntegrationDefinition<DiscordConfig> = {
         { name: "guild_id", type: "string", description: "Server/guild ID", required: true },
       ],
     },
+    {
+      id: "discord_download_file",
+      name: "Download Discord Attachment",
+      description: "Download a file attachment from a Discord message and ingest it into the knowledge base",
+      parameters: [
+        { name: "attachment_url", type: "string", description: "Direct CDN URL of the Discord attachment", required: true },
+        { name: "file_name", type: "string", description: "Original file name", required: true },
+        { name: "user_id", type: "string", description: "User ID for RAG ownership", required: true },
+      ],
+    },
   ],
 };
 
@@ -96,6 +107,21 @@ export class DiscordInstance extends BaseIntegration<DiscordConfig> {
         const textChannels = channels.filter((c) => c.type === 0);
         const list = textChannels.map((c) => `#${c.name} (${c.id})`).join("\n");
         return { success: true, output: `Channels:\n${list}`, data: channels };
+      }
+      case "discord_download_file": {
+        // Discord attachment URLs are direct CDN links, no additional auth needed
+        const result = await downloadAndIngestFile({
+          url: args.attachment_url as string,
+          fileName: args.file_name as string,
+          userId: args.user_id as string,
+          source: "Discord",
+        });
+
+        return {
+          success: result.success,
+          output: formatFileResults([result]),
+          data: result,
+        };
       }
       default:
         return { success: false, output: `Unknown skill: ${skillId}` };
