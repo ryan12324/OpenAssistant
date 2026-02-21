@@ -13,12 +13,14 @@ interface SettingsData {
   mistralApiKey: string;
   xaiApiKey: string;
   deepseekApiKey: string;
+  moonshotApiKey: string;
   openrouterApiKey: string;
   perplexityApiKey: string;
   minimaxApiKey: string;
   glmApiKey: string;
   huggingfaceApiKey: string;
   vercelAiGatewayKey: string;
+  embeddingProvider: string;
   embeddingModel: string;
   embeddingApiKey: string;
   embeddingBaseUrl: string;
@@ -31,6 +33,7 @@ const PROVIDERS = [
   { id: "mistral", label: "Mistral", keyField: "mistralApiKey" },
   { id: "xai", label: "xAI (Grok)", keyField: "xaiApiKey" },
   { id: "deepseek", label: "DeepSeek", keyField: "deepseekApiKey" },
+  { id: "moonshot", label: "Moonshot AI (Kimi)", keyField: "moonshotApiKey" },
   { id: "openrouter", label: "OpenRouter", keyField: "openrouterApiKey" },
   { id: "perplexity", label: "Perplexity", keyField: "perplexityApiKey" },
   { id: "ollama", label: "Ollama (local)", keyField: "" },
@@ -48,6 +51,7 @@ const DEFAULT_MODELS: Record<string, string> = {
   mistral: "mistral-large-latest",
   xai: "grok-3",
   deepseek: "deepseek-chat",
+  moonshot: "kimi-2.5",
   openrouter: "openai/gpt-4o",
   perplexity: "sonar-pro",
   ollama: "llama3.1",
@@ -260,10 +264,31 @@ export default function SettingsPage() {
             <div className="rounded-lg border border-border bg-card p-6">
               <h2 className="mb-4 font-medium">Embedding Model</h2>
               <p className="mb-4 text-xs text-muted-foreground">
-                Used by the RAG memory system. Defaults to the LLM provider
-                settings if left empty.
+                Used by the RAG memory system. Select a different provider if
+                your LLM provider does not offer embeddings (e.g. Moonshot).
+                Leave empty to use the LLM provider settings.
               </p>
               <div className="space-y-4">
+                {/* Embedding Provider */}
+                <div>
+                  <label className="mb-1 block text-sm text-muted-foreground">
+                    Embedding Provider
+                  </label>
+                  <select
+                    value={settings.embeddingProvider}
+                    onChange={(e) =>
+                      update("embeddingProvider", e.target.value)
+                    }
+                    className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+                  >
+                    <option value="">Same as LLM provider</option>
+                    {PROVIDERS.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
                 <div>
                   <label className="mb-1 block text-sm text-muted-foreground">
                     Embedding Model
@@ -284,7 +309,11 @@ export default function SettingsPage() {
                     type="password"
                     value={settings.embeddingApiKey}
                     onChange={(e) => update("embeddingApiKey", e.target.value)}
-                    placeholder="Same as LLM provider key"
+                    placeholder={
+                      settings.embeddingProvider
+                        ? "Key for embedding provider"
+                        : "Same as LLM provider key"
+                    }
                     className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm font-mono"
                   />
                 </div>
@@ -296,7 +325,11 @@ export default function SettingsPage() {
                     type="text"
                     value={settings.embeddingBaseUrl}
                     onChange={(e) => update("embeddingBaseUrl", e.target.value)}
-                    placeholder="Same as LLM provider URL"
+                    placeholder={
+                      settings.embeddingProvider
+                        ? "Leave empty for provider default"
+                        : "Same as LLM provider URL"
+                    }
                     className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm font-mono"
                   />
                 </div>

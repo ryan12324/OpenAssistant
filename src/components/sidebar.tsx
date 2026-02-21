@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { signOut } from "@/lib/auth-client";
 import { cn } from "@/lib/utils";
 
@@ -15,17 +15,47 @@ interface Conversation {
 
 export function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [collapsed, setCollapsed] = useState(false);
 
-  useEffect(() => {
+  const refreshConversations = useCallback(() => {
     fetch("/api/conversations")
       .then((res) => res.json())
       .then((data) => {
         if (Array.isArray(data)) setConversations(data);
       })
       .catch(() => {});
-  }, [pathname]);
+  }, []);
+
+  // Refresh on route change
+  useEffect(() => {
+    refreshConversations();
+  }, [pathname, refreshConversations]);
+
+  // Listen for conversationCreated events from chat-view
+  useEffect(() => {
+    const handler = () => refreshConversations();
+    window.addEventListener("conversationCreated", handler);
+    return () => window.removeEventListener("conversationCreated", handler);
+  }, [refreshConversations]);
+
+  async function deleteConversation(convId: string) {
+    try {
+      await fetch("/api/conversations", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ conversationId: convId }),
+      });
+      setConversations((prev) => prev.filter((c) => c.id !== convId));
+      // If we're viewing the deleted conversation, navigate home
+      if (pathname === `/chat/${convId}`) {
+        router.push("/");
+      }
+    } catch {
+      // Silently fail
+    }
+  }
 
   return (
     <aside
@@ -159,6 +189,29 @@ export function Sidebar() {
             Integrations
           </Link>
           <Link
+            href="/mcp"
+            className={cn(
+              "flex items-center gap-2 rounded-md px-3 py-2 text-sm",
+              pathname === "/mcp"
+                ? "bg-muted text-foreground"
+                : "text-muted-foreground hover:bg-muted hover:text-foreground"
+            )}
+          >
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
+              <rect x="2" y="3" width="20" height="6" rx="1" />
+              <rect x="2" y="15" width="20" height="6" rx="1" />
+              <path d="M12 9v6" />
+            </svg>
+            MCP Servers
+          </Link>
+          <Link
             href="/teams"
             className={cn(
               "flex items-center gap-2 rounded-md px-3 py-2 text-sm",
@@ -235,18 +288,42 @@ export function Sidebar() {
             Recent
           </p>
           {conversations.map((conv) => (
-            <Link
+            <div
               key={conv.id}
-              href={`/chat/${conv.id}`}
               className={cn(
-                "block truncate rounded-md px-3 py-2 text-sm",
+                "group flex items-center rounded-md text-sm",
                 pathname === `/chat/${conv.id}`
                   ? "bg-muted text-foreground"
                   : "text-muted-foreground hover:bg-muted hover:text-foreground"
               )}
             >
-              {conv.title}
-            </Link>
+              <Link
+                href={`/chat/${conv.id}`}
+                className="flex-1 truncate px-3 py-2"
+              >
+                {conv.title}
+              </Link>
+              <button
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  deleteConversation(conv.id);
+                }}
+                className="mr-1 shrink-0 rounded p-1 opacity-0 transition-opacity hover:bg-destructive/20 hover:text-destructive group-hover:opacity-100"
+                title="Delete conversation"
+              >
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                >
+                  <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                </svg>
+              </button>
+            </div>
           ))}
         </div>
       )}

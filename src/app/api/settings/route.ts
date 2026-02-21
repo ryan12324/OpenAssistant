@@ -1,11 +1,22 @@
 import { requireSession } from "@/lib/auth-server";
 import { getSettings, updateSettings, getEffectiveAIConfig } from "@/lib/settings";
+import { getLogger } from "@/lib/logger";
+
+const log = getLogger("api.settings");
 
 /** GET /api/settings — Return current settings (keys are masked). */
 export async function GET() {
   try {
-    await requireSession();
+    const session = await requireSession();
+    log.info("Fetching settings", { userId: session?.user?.id });
+
     const s = await getSettings();
+
+    log.debug("Settings retrieved", {
+      userId: session?.user?.id,
+      provider: s.aiProvider || "",
+      model: s.aiModel || "",
+    });
 
     // Mask API keys: show last 4 chars only
     const mask = (v: string | null) =>
@@ -22,6 +33,7 @@ export async function GET() {
       mistralApiKey: mask(s.mistralApiKey),
       xaiApiKey: mask(s.xaiApiKey),
       deepseekApiKey: mask(s.deepseekApiKey),
+      moonshotApiKey: mask(s.moonshotApiKey),
       openrouterApiKey: mask(s.openrouterApiKey),
       perplexityApiKey: mask(s.perplexityApiKey),
       minimaxApiKey: mask(s.minimaxApiKey),
@@ -29,14 +41,17 @@ export async function GET() {
       huggingfaceApiKey: mask(s.huggingfaceApiKey),
       vercelAiGatewayKey: mask(s.vercelAiGatewayKey),
       // Embedding
+      embeddingProvider: s.embeddingProvider || "",
       embeddingModel: s.embeddingModel || "",
       embeddingApiKey: mask(s.embeddingApiKey),
       embeddingBaseUrl: s.embeddingBaseUrl || "",
     });
   } catch (error) {
     if (error instanceof Error && error.message === "Unauthorized") {
+      log.warn("Unauthorized access attempt on GET /api/settings");
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
+    log.error("Failed to fetch settings", { error });
     return Response.json({ error: "Internal server error" }, { status: 500 });
   }
 }
@@ -44,7 +59,7 @@ export async function GET() {
 /** PATCH /api/settings — Update settings fields. */
 export async function PATCH(req: Request) {
   try {
-    await requireSession();
+    const session = await requireSession();
     const body = await req.json();
 
     // Whitelist allowed fields
@@ -58,12 +73,14 @@ export async function PATCH(req: Request) {
       "mistralApiKey",
       "xaiApiKey",
       "deepseekApiKey",
+      "moonshotApiKey",
       "openrouterApiKey",
       "perplexityApiKey",
       "minimaxApiKey",
       "glmApiKey",
       "huggingfaceApiKey",
       "vercelAiGatewayKey",
+      "embeddingProvider",
       "embeddingModel",
       "embeddingApiKey",
       "embeddingBaseUrl",
@@ -77,13 +94,32 @@ export async function PATCH(req: Request) {
       }
     }
 
+    const fieldNames = Object.keys(data);
+    log.info("Updating settings", {
+      userId: session?.user?.id,
+      fields: fieldNames,
+    });
+
+    log.debug("Applied settings fields", {
+      userId: session?.user?.id,
+      appliedFields: fieldNames,
+      fieldCount: fieldNames.length,
+    });
+
     const updated = await updateSettings(data);
+
+    log.info("Settings updated successfully", {
+      userId: session?.user?.id,
+      updatedAt: updated.updatedAt,
+    });
 
     return Response.json({ status: "ok", updatedAt: updated.updatedAt });
   } catch (error) {
     if (error instanceof Error && error.message === "Unauthorized") {
+      log.warn("Unauthorized access attempt on PATCH /api/settings");
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
+    log.error("Failed to update settings", { error });
     return Response.json({ error: "Internal server error" }, { status: 500 });
   }
 }

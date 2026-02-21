@@ -4,6 +4,10 @@ import type {
   IntegrationInstance,
   IntegrationStatus,
 } from "./types";
+import { prisma } from "@/lib/prisma";
+import { getLogger } from "@/lib/logger";
+
+const log = getLogger("integrations");
 
 // Import all integration definitions
 import { telegramIntegration, TelegramInstance } from "./chat/telegram";
@@ -25,6 +29,7 @@ import { ollamaIntegration, OllamaInstance } from "./ai/ollama";
 import { openrouterIntegration, OpenRouterInstance } from "./ai/openrouter";
 import { mistralIntegration, MistralInstance } from "./ai/mistral";
 import { deepseekIntegration, DeepSeekInstance } from "./ai/deepseek";
+import { moonshotIntegration, MoonshotInstance } from "./ai/moonshot";
 import { xaiIntegration, XAIInstance } from "./ai/xai";
 import { perplexityIntegration, PerplexityInstance } from "./ai/perplexity";
 import { minimaxIntegration, MiniMaxInstance } from "./ai/minimax";
@@ -79,8 +84,13 @@ interface RegistryEntry {
 class IntegrationRegistry {
   private integrations: Map<string, RegistryEntry> = new Map();
   private instances: Map<string, IntegrationInstance> = new Map();
+  /** User-scoped instances keyed by "userId:integrationId" */
+  private userInstances: Map<string, IntegrationInstance> = new Map();
+  /** Track which users have been hydrated to avoid redundant DB queries */
+  private hydratedUsers: Set<string> = new Set();
 
   register(definition: IntegrationDefinition, instanceClass: InstanceConstructor): void {
+    log.debug("Registering integration definition", { integrationId: definition.id });
     this.integrations.set(definition.id, { definition, instanceClass });
   }
 
@@ -100,11 +110,30 @@ class IntegrationRegistry {
    * Create and connect an integration instance.
    */
   async createInstance(id: string, config: IntegrationConfig): Promise<IntegrationInstance> {
+    log.info("Creating integration instance", { integrationId: id });
     const entry = this.integrations.get(id);
     if (!entry) throw new Error(`Integration "${id}" not found`);
 
     const instance = new entry.instanceClass(entry.definition, config);
     this.instances.set(id, instance);
+    return instance;
+  }
+
+  /**
+   * Create and connect a user-scoped integration instance.
+   */
+  async createUserInstance(
+    userId: string,
+    integrationId: string,
+    config: IntegrationConfig
+  ): Promise<IntegrationInstance> {
+    log.info("Creating user integration instance", { userId, integrationId });
+    const entry = this.integrations.get(integrationId);
+    if (!entry) throw new Error(`Integration "${integrationId}" not found`);
+
+    const key = `${userId}:${integrationId}`;
+    const instance = new entry.instanceClass(entry.definition, config);
+    this.userInstances.set(key, instance);
     return instance;
   }
 
@@ -118,15 +147,129 @@ class IntegrationRegistry {
     );
   }
 
+  /**
+   * Get active integration instances for a specific user.
+   * Includes both user-scoped instances and global instances.
+   */
+  getActiveInstancesForUser(userId: string): IntegrationInstance[] {
+    const result: IntegrationInstance[] = [];
+    const seenIds = new Set<string>();
+
+    // User-scoped instances first (take priority)
+    for (const [key, instance] of this.userInstances) {
+      if (key.startsWith(`${userId}:`) && instance.status === "connected") {
+        result.push(instance);
+        seenIds.add(instance.definition.id);
+      }
+    }
+
+    // Global instances as fallback (for backwards compatibility)
+    for (const instance of this.instances.values()) {
+      if (instance.status === "connected" && !seenIds.has(instance.definition.id)) {
+        result.push(instance);
+      }
+    }
+
+    log.debug("Retrieved active instances for user", { userId, count: result.length });
+    return result;
+  }
+
+  /**
+   * Load a user's enabled integrations from the database and create/connect
+   * instances. Skips integrations that are already active for the user.
+   * Safe to call on every request — uses a hydration cache.
+   */
+  async hydrateUserIntegrations(userId: string): Promise<void> {
+    if (this.hydratedUsers.has(userId)) return;
+
+    log.info("Hydrating user integrations", { userId });
+
+    try {
+      const configs = await prisma.skillConfig.findMany({
+        where: { userId, enabled: true },
+      });
+
+      let hydratedCount = 0;
+
+      for (const cfg of configs) {
+        // Only hydrate integrations that have a registered definition
+        if (!this.integrations.has(cfg.skillId)) continue;
+        // Skip if already active for this user
+        const key = `${userId}:${cfg.skillId}`;
+        const existing = this.userInstances.get(key);
+        if (existing && existing.status === "connected") continue;
+
+        if (!cfg.config) continue;
+
+        try {
+          const config = JSON.parse(cfg.config) as IntegrationConfig;
+          const instance = await this.createUserInstance(userId, cfg.skillId, config);
+          await instance.connect();
+          log.debug("Hydrated integration", { userId, integrationId: cfg.skillId });
+          hydratedCount++;
+        } catch (error) {
+          log.warn(`Failed to hydrate integration "${cfg.skillId}"`, {
+            userId,
+            integrationId: cfg.skillId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+
+      this.hydratedUsers.add(userId);
+      log.info("User integrations hydration complete", { userId, count: hydratedCount });
+    } catch (error) {
+      log.error("Failed to hydrate integrations", { userId, error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
+  /**
+   * Clear hydration cache for a user so integrations are re-loaded on next request.
+   * Call this when a user changes their integration config.
+   */
+  invalidateUser(userId: string): void {
+    log.info("Invalidating user integration cache", { userId });
+    this.hydratedUsers.delete(userId);
+    // Remove existing user instances so they're recreated
+    for (const key of this.userInstances.keys()) {
+      if (key.startsWith(`${userId}:`)) {
+        const instance = this.userInstances.get(key);
+        if (instance) {
+          instance.disconnect().catch(() => {});
+        }
+        this.userInstances.delete(key);
+      }
+    }
+  }
+
   async disconnectAll(): Promise<void> {
+    log.info("Disconnecting all integration instances", {
+      globalCount: this.instances.size,
+      userCount: this.userInstances.size,
+    });
+
     for (const instance of this.instances.values()) {
       try {
         await instance.disconnect();
       } catch (e) {
-        console.error(`Failed to disconnect ${instance.definition.id}:`, e);
+        log.error(`Failed to disconnect ${instance.definition.id}`, {
+          error: e instanceof Error ? e.message : String(e),
+        });
       }
     }
     this.instances.clear();
+
+    for (const instance of this.userInstances.values()) {
+      try {
+        await instance.disconnect();
+      } catch (e) {
+        log.error(`Failed to disconnect ${instance.definition.id}`, {
+          error: e instanceof Error ? e.message : String(e),
+        });
+      }
+    }
+    this.userInstances.clear();
+    this.hydratedUsers.clear();
   }
 }
 
@@ -154,6 +297,7 @@ integrationRegistry.register(ollamaIntegration, OllamaInstance as unknown as Ins
 integrationRegistry.register(openrouterIntegration, OpenRouterInstance as unknown as InstanceConstructor);
 integrationRegistry.register(mistralIntegration, MistralInstance as unknown as InstanceConstructor);
 integrationRegistry.register(deepseekIntegration, DeepSeekInstance as unknown as InstanceConstructor);
+integrationRegistry.register(moonshotIntegration, MoonshotInstance as unknown as InstanceConstructor);
 integrationRegistry.register(xaiIntegration, XAIInstance as unknown as InstanceConstructor);
 integrationRegistry.register(perplexityIntegration, PerplexityInstance as unknown as InstanceConstructor);
 integrationRegistry.register(minimaxIntegration, MiniMaxInstance as unknown as InstanceConstructor);

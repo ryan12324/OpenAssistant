@@ -1,6 +1,9 @@
 import { createOpenAI } from "@ai-sdk/openai";
 import type { LanguageModelV1 } from "ai";
 import { getEffectiveAIConfig } from "@/lib/settings";
+import { getLogger, maskSecret } from "@/lib/logger";
+
+const log = getLogger("ai.providers");
 
 /**
  * Supported AI provider identifiers.
@@ -13,6 +16,7 @@ export type AIProvider =
   | "mistral"
   | "xai"
   | "deepseek"
+  | "moonshot"
   | "openrouter"
   | "perplexity"
   | "ollama"
@@ -38,7 +42,7 @@ export interface ModelConfig {
  * supports any OpenAI-compatible endpoint and these providers all
  * expose compatible endpoints.
  */
-const PROVIDER_DEFAULTS: Record<
+export const PROVIDER_DEFAULTS: Record<
   AIProvider,
   { baseUrl: string; defaultModel: string; envKey: string; headerKey?: string }
 > = {
@@ -71,6 +75,11 @@ const PROVIDER_DEFAULTS: Record<
     baseUrl: "https://api.deepseek.com/v1",
     defaultModel: "deepseek-chat",
     envKey: "DEEPSEEK_API_KEY",
+  },
+  moonshot: {
+    baseUrl: "https://api.moonshot.cn/v1",
+    defaultModel: "kimi-2.5",
+    envKey: "MOONSHOT_API_KEY",
   },
   openrouter: {
     baseUrl: "https://openrouter.ai/api/v1",
@@ -115,35 +124,26 @@ const PROVIDER_DEFAULTS: Record<
 };
 
 /**
- * Resolve a model string like "openai/gpt-4o" or "anthropic/claude-sonnet-4-5-20250929"
- * into a provider and model name.
- */
-export function parseModelString(modelStr: string): { provider: AIProvider; model: string } {
-  const slash = modelStr.indexOf("/");
-  if (slash > 0) {
-    const provider = modelStr.slice(0, slash) as AIProvider;
-    const model = modelStr.slice(slash + 1);
-    if (provider in PROVIDER_DEFAULTS) {
-      return { provider, model };
-    }
-  }
-  // Default to OpenAI if no provider prefix
-  return { provider: "openai", model: modelStr };
-}
-
-/**
  * Create a Vercel AI SDK LanguageModel from a ModelConfig.
  * All providers are accessed through OpenAI-compatible endpoints using createOpenAI.
  */
 export function resolveModel(config: ModelConfig): LanguageModelV1 {
   const defaults = PROVIDER_DEFAULTS[config.provider];
   if (!defaults) {
+    log.error("Unknown AI provider requested", { provider: config.provider });
     throw new Error(`Unknown AI provider: ${config.provider}`);
   }
 
   const baseURL = config.baseUrl || defaults.baseUrl;
   const apiKey = config.apiKey || (defaults.envKey ? process.env[defaults.envKey] : undefined) || "";
   const modelId = config.model || defaults.defaultModel;
+
+  log.info("Resolving AI model", {
+    provider: config.provider,
+    modelId,
+    baseURL,
+    apiKey: maskSecret(apiKey),
+  });
 
   const client = createOpenAI({
     baseURL,
@@ -155,57 +155,105 @@ export function resolveModel(config: ModelConfig): LanguageModelV1 {
 }
 
 /**
- * Resolve a model from a simple string like "gpt-4o" or "anthropic/claude-sonnet-4-5-20250929".
- * Falls back to env vars AI_PROVIDER / AI_MODEL / OPENAI_API_KEY.
- */
-export function resolveModelFromString(modelStr?: string): LanguageModelV1 {
-  if (modelStr) {
-    const { provider, model } = parseModelString(modelStr);
-    return resolveModel({ provider, model });
-  }
-
-  // Fall back to environment-configured defaults
-  const envProvider = (process.env.AI_PROVIDER || "openai") as AIProvider;
-  const envModel = process.env.AI_MODEL || PROVIDER_DEFAULTS[envProvider]?.defaultModel || "gpt-4o";
-  return resolveModel({ provider: envProvider, model: envModel });
-}
-
-/**
  * Resolve a model using DB-stored settings (with env fallback).
  * This is the primary entry point — use this in all server-side code.
  */
 export async function resolveModelFromSettings(): Promise<LanguageModelV1> {
+  log.debug("Resolving model from settings");
+
   const config = await getEffectiveAIConfig();
 
+  const configProvider = (config.provider || "openai") as AIProvider;
   const modelStr = config.model || "";
+
+  // The DB stores a single "openaiBaseUrl" field that persists across provider
+  // switches. Only use it if it's genuinely custom — i.e. not a known default
+  // for a *different* provider (which would mean it's stale from a previous
+  // provider selection).
+  const baseUrl = sanitizeBaseUrl(config.baseUrl, configProvider);
+
   if (modelStr) {
-    const { provider, model } = parseModelString(modelStr);
+    log.info("Resolved model from settings", {
+      provider: configProvider,
+      model: modelStr,
+      baseUrl: baseUrl || "(provider default)",
+      apiKey: maskSecret(config.apiKey),
+    });
+
     return resolveModel({
-      provider,
-      model,
+      provider: configProvider,
+      model: modelStr,
       apiKey: config.apiKey,
-      baseUrl: config.baseUrl || undefined,
+      baseUrl,
     });
   }
 
-  const provider = (config.provider || "openai") as AIProvider;
-  const defaults = PROVIDER_DEFAULTS[provider];
+  log.debug("No model string in settings, falling back to provider default", {
+    provider: configProvider,
+  });
+
+  const defaults = PROVIDER_DEFAULTS[configProvider];
   return resolveModel({
-    provider,
+    provider: configProvider,
     model: defaults?.defaultModel || "gpt-4o",
     apiKey: config.apiKey,
-    baseUrl: config.baseUrl || undefined,
+    baseUrl,
   });
+}
+
+/**
+ * Determine whether a stored base URL should be used for the current provider.
+ *
+ * The DB has a single `openaiBaseUrl` column that persists across provider
+ * switches. If the stored URL matches the default for a *different* provider,
+ * it's stale and should be discarded so the correct provider default is used.
+ * If it matches the *current* provider's default, it's also safe to discard
+ * (it's redundant). Only genuinely custom URLs are kept.
+ */
+export function sanitizeBaseUrl(raw: string | undefined | null, currentProvider: AIProvider): string | undefined {
+  if (!raw) return undefined;
+
+  // Check if the stored URL matches any provider's default
+  for (const [providerId, defaults] of Object.entries(PROVIDER_DEFAULTS)) {
+    if (raw === defaults.baseUrl) {
+      if (providerId === currentProvider) {
+        // Matches current provider default — redundant, let resolveModel use it naturally
+        log.debug("Base URL matches current provider default, ignoring", {
+          provider: currentProvider,
+          baseUrl: raw,
+        });
+      } else {
+        // Matches a DIFFERENT provider's default — stale from a previous switch
+        log.warn("Discarding stale base URL from previous provider", {
+          storedUrl: raw,
+          matchedProvider: providerId,
+          currentProvider,
+        });
+      }
+      return undefined;
+    }
+  }
+
+  // Genuinely custom URL — keep it
+  log.debug("Using custom base URL override", {
+    provider: currentProvider,
+    baseUrl: raw,
+  });
+  return raw;
 }
 
 /**
  * Get the list of all supported providers with their default models.
  */
 export function getProviderList() {
-  return Object.entries(PROVIDER_DEFAULTS).map(([id, config]) => ({
+  const list = Object.entries(PROVIDER_DEFAULTS).map(([id, config]) => ({
     id: id as AIProvider,
     defaultModel: config.defaultModel,
     envKey: config.envKey,
     baseUrl: config.baseUrl,
   }));
+
+  log.debug("Returning provider list", { providerCount: list.length });
+
+  return list;
 }

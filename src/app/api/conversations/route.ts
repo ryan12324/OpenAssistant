@@ -1,9 +1,13 @@
 import { NextRequest } from "next/server";
 import { requireSession } from "@/lib/auth-server";
 import { prisma } from "@/lib/prisma";
+import { getLogger } from "@/lib/logger";
+
+const log = getLogger("api.conversations");
 
 export async function GET() {
   try {
+    log.info("Listing conversations");
     const session = await requireSession();
 
     const conversations = await prisma.conversation.findMany({
@@ -13,15 +17,22 @@ export async function GET() {
         messages: {
           take: 1,
           orderBy: { createdAt: "desc" },
+          select: { id: true, role: true, content: true, source: true, createdAt: true },
+        },
+        channelLinks: {
+          select: { platform: true, externalId: true },
         },
       },
     });
 
+    log.info("Conversations listed successfully", { count: conversations.length });
     return Response.json(conversations);
   } catch (error) {
     if (error instanceof Error && error.message === "Unauthorized") {
+      log.warn("Unauthorized request to list conversations");
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
+    log.error("Failed to list conversations", { error });
     return Response.json({ error: "Internal server error" }, { status: 500 });
   }
 }
@@ -31,6 +42,8 @@ export async function DELETE(req: NextRequest) {
     const session = await requireSession();
     const { conversationId } = await req.json();
 
+    log.info("Deleting conversation", { conversationId });
+
     await prisma.conversation.deleteMany({
       where: {
         id: conversationId,
@@ -38,11 +51,14 @@ export async function DELETE(req: NextRequest) {
       },
     });
 
+    log.info("Conversation deleted successfully", { conversationId });
     return Response.json({ status: "ok" });
   } catch (error) {
     if (error instanceof Error && error.message === "Unauthorized") {
+      log.warn("Unauthorized request to delete conversation");
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
+    log.error("Failed to delete conversation", { error });
     return Response.json({ error: "Internal server error" }, { status: 500 });
   }
 }

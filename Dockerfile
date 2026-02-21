@@ -45,7 +45,9 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=builder /app/prisma ./prisma
 
 # Copy Prisma CLI with all transitive deps (for `prisma db push` at startup)
-COPY --from=prisma-cli /prisma-cli/node_modules ./node_modules/.prisma-cli
+# Kept at a separate top-level path so Node's standard module resolution works
+# for both CJS and ESM imports within the prisma dependency tree.
+COPY --from=prisma-cli /prisma-cli /prisma-cli
 
 # Copy kreuzberg native bindings (needed at runtime)
 COPY --from=builder /app/node_modules/@kreuzberg ./node_modules/@kreuzberg

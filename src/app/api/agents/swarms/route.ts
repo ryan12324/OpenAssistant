@@ -2,10 +2,14 @@ import { NextRequest } from "next/server";
 import { requireSession } from "@/lib/auth-server";
 import { SwarmOrchestrator, presetSwarms } from "@/lib/agents";
 import type { SwarmDefinition } from "@/lib/agents";
+import { getLogger } from "@/lib/logger";
+
+const log = getLogger("api.agents.swarms");
 
 /** GET /api/agents/swarms — List available swarm presets */
 export async function GET() {
   try {
+    log.info("Listing available swarm presets");
     await requireSession();
 
     const swarms = presetSwarms.map((s) => ({
@@ -20,6 +24,7 @@ export async function GET() {
       })),
     }));
 
+    log.debug("Swarm presets retrieved", { count: swarms.length });
     return Response.json({ swarms });
   } catch (error) {
     if (error instanceof Error && error.message === "Unauthorized") {
@@ -31,6 +36,7 @@ export async function GET() {
 
 /** POST /api/agents/swarms — Run a swarm on a task */
 export async function POST(req: NextRequest) {
+  const startTime = Date.now();
   try {
     const session = await requireSession();
     const body = await req.json();
@@ -43,12 +49,16 @@ export async function POST(req: NextRequest) {
       agentTasks?: Record<string, string>;
     };
 
+    log.info("Swarm execution requested", { swarmId, task });
+
     if (!task) {
+      log.warn("Swarm execution rejected: missing task");
       return Response.json({ error: "Task is required" }, { status: 400 });
     }
 
     const definition = customSwarm || presetSwarms.find((s) => s.id === swarmId);
     if (!definition) {
+      log.warn("Swarm not found", { swarmId });
       return Response.json({ error: "Swarm not found" }, { status: 404 });
     }
 
@@ -63,9 +73,11 @@ export async function POST(req: NextRequest) {
       agentTasks,
     });
 
+    const durationMs = Date.now() - startTime;
+    log.info("Swarm execution completed", { swarmId: definition.id, durationMs });
     return Response.json(result);
   } catch (error) {
-    console.error("Swarm execution error:", error);
+    log.error("Swarm execution error", { error });
     if (error instanceof Error && error.message === "Unauthorized") {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }

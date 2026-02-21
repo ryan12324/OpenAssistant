@@ -23,8 +23,11 @@ model User {
 
   // App-specific relations
   conversations Conversation[]
+  channelLinks  ChannelLink[]
   memories      Memory[]
   skillConfigs  SkillConfig[]
+  auditLogs     AuditLog[]
+  mcpServers    McpServer[]
 }
 
 model Session {
@@ -75,20 +78,38 @@ model Conversation {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  userId   String
-  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  messages Message[]
+  userId       String
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages     Message[]
+  channelLinks ChannelLink[]
 }
 
 model Message {
   id        String   @id @default(cuid())
   role      String   // "user" | "assistant" | "system"
   content   String
+  source    String?  // "web" | "telegram" | "discord" | "slack" | ... (null = web)
   metadata  String?  // JSON string for tool calls, memory refs, etc.
   createdAt DateTime @default(now())
 
   conversationId String
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+}
+
+/// Maps external platform channels to internal conversations so inbound
+/// messages from different platforms share the same conversation context.
+model ChannelLink {
+  id             String   @id @default(cuid())
+  platform       String   // "telegram" | "discord" | "slack" | ...
+  externalId     String   // platform-specific chat/channel/thread ID
+  createdAt      DateTime @default(now())
+
+  userId         String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, platform, externalId])
 }
 
 model Memory {
@@ -117,6 +138,7 @@ model AppSettings {
   mistralApiKey       String?
   xaiApiKey           String?
   deepseekApiKey      String?
+  moonshotApiKey      String?
   openrouterApiKey    String?
   perplexityApiKey    String?
   minimaxApiKey       String?
@@ -126,9 +148,10 @@ model AppSettings {
   // Optional base URL override
   openaiBaseUrl   String?
   // Embedding overrides
-  embeddingModel   String?
-  embeddingApiKey  String?
-  embeddingBaseUrl String?
+  embeddingProvider String?  // "openai" | "anthropic" | ... (null = same as LLM provider)
+  embeddingModel    String?
+  embeddingApiKey   String?
+  embeddingBaseUrl  String?
   // Timestamps
   updatedAt DateTime @updatedAt
 }
@@ -145,4 +168,71 @@ model SkillConfig {
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, skillId])
+}
+
+// ─── Gateway Pattern: Job Queue ─────────────────────────────
+
+/// Persistent job queue backed by SQLite. Inbound webhook messages are
+/// enqueued here so the HTTP handler can return immediately. A background
+/// worker polls and processes jobs asynchronously.
+model Job {
+  id         String   @id @default(cuid())
+  type       String   // "inbound_message" | "compact_conversation" | ...
+  status     String   @default("pending") // "pending" | "processing" | "completed" | "failed"
+  payload    String   // JSON
+  result     String?  // JSON
+  attempts   Int      @default(0)
+  maxRetries Int      @default(3)
+  error      String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  userId String?
+
+  @@index([status, createdAt])
+}
+
+// ─── Harness: Audit Log ─────────────────────────────────────
+
+/// Records every tool call / skill execution for security auditing.
+model AuditLog {
+  id         String   @id @default(cuid())
+  action     String   // "tool_call" | "skill_execute" | "memory_store" | ...
+  skillId    String?
+  input      String?  // JSON (sanitized)
+  output     String?  // JSON (truncated)
+  source     String?  // "web" | "telegram" | "agent" | ...
+  durationMs Int?
+  success    Boolean  @default(true)
+  createdAt  DateTime @default(now())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([action, createdAt])
+}
+
+// ─── MCP Server Configuration ───────────────────────────────
+
+/// Per-user MCP server configurations. Each row represents an external
+/// MCP server that the user has configured (via the UI or API).
+/// Global servers from the config file are NOT stored here.
+model McpServer {
+  id        String   @id @default(cuid())
+  name      String
+  transport String   // "stdio" | "http"
+  command   String?  // stdio: command to spawn (e.g. "npx")
+  args      String?  // JSON array of command arguments
+  env       String?  // JSON object of environment variables
+  url       String?  // http: server URL
+  headers   String?  // JSON object of HTTP headers
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, name])
 }
