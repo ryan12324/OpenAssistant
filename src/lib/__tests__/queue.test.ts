@@ -312,6 +312,30 @@ describe("registerHandler", () => {
 
     expect(mockInfo).toHaveBeenCalledWith("Job handler registered");
   });
+
+  it("warns when handler is already registered (initialization guard)", async () => {
+    const { registerHandler } = await loadQueue();
+
+    const fn1 = vi.fn();
+    const fn2 = vi.fn();
+    registerHandler(fn1);
+
+    vi.clearAllMocks();
+
+    registerHandler(fn2);
+
+    expect(mockWarn).toHaveBeenCalledWith("Job handler already registered, replacing");
+    expect(mockInfo).toHaveBeenCalledWith("Job handler registered");
+  });
+
+  it("does not warn on first registration", async () => {
+    const { registerHandler } = await loadQueue();
+
+    const fn = vi.fn();
+    registerHandler(fn);
+
+    expect(mockWarn).not.toHaveBeenCalledWith("Job handler already registered, replacing");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -444,7 +468,7 @@ describe("tickPoller", () => {
 // ---------------------------------------------------------------------------
 
 describe("startPoller", () => {
-  it("warns and returns when no handler is registered", async () => {
+  it("warns and returns when no handler is registered (not initialized)", async () => {
     const { startPoller } = await loadQueue();
 
     startPoller();

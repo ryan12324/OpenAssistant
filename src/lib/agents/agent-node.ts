@@ -3,8 +3,12 @@ import { z } from "zod";
 import { skillRegistry } from "@/lib/skills/registry";
 import { integrationRegistry } from "@/lib/integrations";
 import { resolveModelFromSettings } from "@/lib/ai/providers";
+import { buildZodSchemaFromParams } from "@/lib/schema-builder";
 import type { AgentPersona, AgentMessage, AgentEvent } from "./types";
 import type { SkillContext } from "@/lib/skills/types";
+import { getLogger } from "@/lib/logger";
+
+const log = getLogger("agents.node");
 
 /**
  * AgentNode — A single autonomous agent with its own persona, skills, and execution.
@@ -29,6 +33,15 @@ export class AgentNode {
     conversationId: string;
   }): Promise<{ output: string; durationMs: number }> {
     const start = Date.now();
+    const agentCtx = { agentId: this.persona.id, agentName: this.persona.name };
+    log.info("Agent run started", {
+      ...agentCtx,
+      userId: params.userId,
+      taskLength: params.task.length,
+      hasContext: !!params.context,
+      historyLength: params.history?.length ?? 0,
+    });
+
     const ctx: SkillContext = {
       userId: params.userId,
       conversationId: params.conversationId,
@@ -37,20 +50,44 @@ export class AgentNode {
     const messages = this.buildMessages(params.task, params.context, params.history);
 
     const model = await resolveModelFromSettings();
-
-    const result = await generateText({
-      model,
-      messages,
-      tools: this.buildTools(ctx),
-      maxSteps: 8,
+    log.info("LLM request starting", {
+      ...agentCtx,
+      model: String(model.modelId ?? model),
+      messageCount: messages.length,
       maxTokens: this.persona.maxTokens,
       temperature: this.persona.temperature,
     });
 
-    return {
-      output: result.text,
-      durationMs: Date.now() - start,
-    };
+    try {
+      const result = await generateText({
+        model,
+        messages,
+        tools: this.buildTools(ctx),
+        maxSteps: 8,
+        maxTokens: this.persona.maxTokens,
+        temperature: this.persona.temperature,
+      });
+
+      const durationMs = Date.now() - start;
+      log.info("LLM request completed", {
+        ...agentCtx,
+        durationMs,
+        outputLength: result.text.length,
+        steps: result.steps?.length ?? 1,
+        finishReason: result.finishReason,
+      });
+
+      return { output: result.text, durationMs };
+    } catch (err) {
+      const durationMs = Date.now() - start;
+      log.error("LLM request failed", {
+        ...agentCtx,
+        durationMs,
+        error: err instanceof Error ? err.message : String(err),
+        errorType: err instanceof Error ? err.constructor.name : typeof err,
+      });
+      throw err;
+    }
   }
 
   /**
@@ -64,6 +101,13 @@ export class AgentNode {
     conversationId: string;
   }): AsyncGenerator<AgentEvent> {
     const start = Date.now();
+    const agentCtx = { agentId: this.persona.id, agentName: this.persona.name };
+    log.info("Agent stream started", {
+      ...agentCtx,
+      userId: params.userId,
+      taskLength: params.task.length,
+    });
+
     const ctx: SkillContext = {
       userId: params.userId,
       conversationId: params.conversationId,
@@ -79,6 +123,11 @@ export class AgentNode {
 
     try {
       const streamModel = await resolveModelFromSettings();
+      log.info("LLM stream request starting", {
+        ...agentCtx,
+        model: String(streamModel.modelId ?? streamModel),
+        messageCount: messages.length,
+      });
 
       const stream = streamText({
         model: streamModel,
@@ -100,13 +149,27 @@ export class AgentNode {
         };
       }
 
+      const durationMs = Date.now() - start;
+      log.info("Agent stream completed", {
+        ...agentCtx,
+        durationMs,
+        outputLength: fullOutput.length,
+      });
+
       yield {
         type: "agent_done",
         agentId: this.persona.id,
         output: fullOutput,
-        durationMs: Date.now() - start,
+        durationMs,
       };
     } catch (error) {
+      const durationMs = Date.now() - start;
+      log.error("Agent stream failed", {
+        ...agentCtx,
+        durationMs,
+        error: error instanceof Error ? error.message : String(error),
+        errorType: error instanceof Error ? error.constructor.name : typeof error,
+      });
       yield {
         type: "agent_error",
         agentId: this.persona.id,
@@ -178,16 +241,7 @@ export class AgentNode {
         continue;
       }
 
-      const shape: Record<string, z.ZodTypeAny> = {};
-      for (const param of skill.parameters) {
-        let schema: z.ZodTypeAny;
-        switch (param.type) {
-          case "number": schema = z.number().describe(param.description); break;
-          case "boolean": schema = z.boolean().describe(param.description); break;
-          default: schema = z.string().describe(param.description);
-        }
-        shape[param.name] = param.required ? schema : schema.optional();
-      }
+      const shape = buildZodSchemaFromParams(skill.parameters);
 
       tools[skill.id] = tool({
         description: skill.description,
@@ -207,16 +261,7 @@ export class AgentNode {
       }
 
       for (const integrationSkill of instance.definition.skills) {
-        const shape: Record<string, z.ZodTypeAny> = {};
-        for (const param of integrationSkill.parameters) {
-          let schema: z.ZodTypeAny;
-          switch (param.type) {
-            case "number": schema = z.number().describe(param.description); break;
-            case "boolean": schema = z.boolean().describe(param.description); break;
-            default: schema = z.string().describe(param.description);
-          }
-          shape[param.name] = param.required ? schema : schema.optional();
-        }
+        const shape = buildZodSchemaFromParams(integrationSkill.parameters);
 
         tools[integrationSkill.id] = tool({
           description: `[${instance.definition.name}] ${integrationSkill.description}`,

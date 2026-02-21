@@ -1,7 +1,11 @@
 import { generateText } from "ai";
 import { AgentNode } from "./agent-node";
 import { resolveModelFromSettings } from "@/lib/ai/providers";
+import { initializeNodes } from "./utils";
 import type { RouterDefinition, AgentEvent, AgentPersona } from "./types";
+import { getLogger } from "@/lib/logger";
+
+const log = getLogger("agents.router");
 
 /**
  * AgentRouter — Routes incoming messages to the most appropriate agent.
@@ -13,10 +17,7 @@ export class AgentRouter {
 
   constructor(definition: RouterDefinition) {
     this.definition = definition;
-    this.nodes = new Map();
-    for (const agent of definition.agents) {
-      this.nodes.set(agent.id, new AgentNode(agent));
-    }
+    this.nodes = initializeNodes(definition.agents);
   }
 
   /**
@@ -34,8 +35,10 @@ export class AgentRouter {
     durationMs: number;
     routingReason: string;
   }> {
+    log.info("Routing message", { messageLength: params.message.length, useAI: this.definition.useAIRouting });
     const { agentId, reason } = await this.classify(params.message);
     const node = this.nodes.get(agentId)!;
+    log.info("Routed to agent", { agentId, agentName: node.persona.name, reason });
 
     const result = await node.run({
       task: params.message,
@@ -43,6 +46,8 @@ export class AgentRouter {
       userId: params.userId,
       conversationId: params.conversationId,
     });
+
+    log.info("Routed agent completed", { agentId, durationMs: result.durationMs, outputLength: result.output.length });
 
     return {
       agentId,
@@ -121,16 +126,20 @@ export class AgentRouter {
   private async classifyWithAI(
     message: string
   ): Promise<{ agentId: string; reason: string }> {
+    log.info("Classifying message with AI");
+    const start = Date.now();
     const agentDescriptions = this.definition.agents
       .map((a) => `- ${a.id}: ${a.name} — ${a.role}`)
       .join("\n");
 
-    const result = await generateText({
-      model: await resolveModelFromSettings(),
-      messages: [
-        {
-          role: "system",
-          content: `You are a message router. Given a user message, decide which agent should handle it.
+    let result;
+    try {
+      result = await generateText({
+        model: await resolveModelFromSettings(),
+        messages: [
+          {
+            role: "system",
+            content: `You are a message router. Given a user message, decide which agent should handle it.
 
 Available agents:
 ${agentDescriptions}
@@ -138,11 +147,19 @@ ${agentDescriptions}
 Default agent: ${this.definition.defaultAgentId}
 
 Respond with ONLY a JSON object: {"agent_id": "...", "reason": "..."}`,
-        },
-        { role: "user", content: message },
-      ],
-      maxTokens: 200,
-    });
+          },
+          { role: "user", content: message },
+        ],
+        maxTokens: 200,
+      });
+      log.info("AI classification LLM call completed", { durationMs: Date.now() - start });
+    } catch (err) {
+      log.error("AI classification LLM call failed", { durationMs: Date.now() - start, error: err instanceof Error ? err.message : String(err) });
+      return {
+        agentId: this.definition.defaultAgentId,
+        reason: "AI routing failed, using default agent",
+      };
+    }
 
     try {
       const match = result.text.match(/\{[\s\S]*\}/);
@@ -151,9 +168,12 @@ Respond with ONLY a JSON object: {"agent_id": "...", "reason": "..."}`,
         if (parsed.agent_id && this.nodes.has(parsed.agent_id)) {
           return { agentId: parsed.agent_id, reason: parsed.reason || "AI routing" };
         }
+        log.warn("AI routing returned unknown agent_id", { agentId: parsed.agent_id, rawOutput: result.text.slice(0, 200) });
+      } else {
+        log.warn("AI routing response contained no JSON", { rawOutput: result.text.slice(0, 200) });
       }
-    } catch {
-      // Fall through to default
+    } catch (err) {
+      log.warn("Failed to parse AI routing response", { rawOutput: result.text.slice(0, 200), error: err instanceof Error ? err.message : String(err) });
     }
 
     return {

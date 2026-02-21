@@ -92,12 +92,12 @@ export const PROVIDER_DEFAULTS: Record<
     envKey: "PERPLEXITY_API_KEY",
   },
   ollama: {
-    baseUrl: "http://localhost:11434/v1",
+    baseUrl: process.env.OLLAMA_BASE_URL ?? "http://localhost:11434/v1",
     defaultModel: "llama3.1",
     envKey: "",
   },
   lmstudio: {
-    baseUrl: "http://localhost:1234/v1",
+    baseUrl: process.env.LMSTUDIO_BASE_URL ?? "http://localhost:1234/v1",
     defaultModel: "local-model",
     envKey: "",
   },
@@ -124,10 +124,14 @@ export const PROVIDER_DEFAULTS: Record<
 };
 
 /**
- * Create a Vercel AI SDK LanguageModel from a ModelConfig.
- * All providers are accessed through OpenAI-compatible endpoints using createOpenAI.
+ * Validate a model configuration and resolve defaults.
+ * Throws if the provider is unknown. Returns the resolved baseURL, apiKey, and modelId.
  */
-export function resolveModel(config: ModelConfig): LanguageModelV1 {
+export function validateModelConfig(config: ModelConfig): {
+  baseURL: string;
+  apiKey: string;
+  modelId: string;
+} {
   const defaults = PROVIDER_DEFAULTS[config.provider];
   if (!defaults) {
     log.error("Unknown AI provider requested", { provider: config.provider });
@@ -137,6 +141,16 @@ export function resolveModel(config: ModelConfig): LanguageModelV1 {
   const baseURL = config.baseUrl || defaults.baseUrl;
   const apiKey = config.apiKey || (defaults.envKey ? process.env[defaults.envKey] : undefined) || "";
   const modelId = config.model || defaults.defaultModel;
+
+  return { baseURL, apiKey, modelId };
+}
+
+/**
+ * Create a Vercel AI SDK LanguageModel from a ModelConfig.
+ * All providers are accessed through OpenAI-compatible endpoints using createOpenAI.
+ */
+export function resolveModel(config: ModelConfig): LanguageModelV1 {
+  const { baseURL, apiKey, modelId } = validateModelConfig(config);
 
   log.info("Resolving AI model", {
     provider: config.provider,
@@ -245,9 +259,16 @@ export function sanitizeBaseUrl(raw: string | undefined | null, currentProvider:
 /**
  * Get the list of all supported providers with their default models.
  */
-export function getProviderList() {
+export function getProviderList(): Array<{
+  id: string;
+  name: string;
+  defaultModel: string;
+  envKey: string;
+  baseUrl: string;
+}> {
   const list = Object.entries(PROVIDER_DEFAULTS).map(([id, config]) => ({
     id: id as AIProvider,
+    name: id,
     defaultModel: config.defaultModel,
     envKey: config.envKey,
     baseUrl: config.baseUrl,

@@ -29,7 +29,7 @@ describe("prisma", () => {
     delete g.prisma;
   });
 
-  it("creates a new PrismaClient, logs creation, and caches on globalThis in non-production", async () => {
+  it("creates a new PrismaClient, logs creation, and caches on globalThis", async () => {
     process.env.NODE_ENV = "test";
 
     const mod = await import("@/lib/prisma");
@@ -38,9 +38,6 @@ describe("prisma", () => {
     expect(mockLog.info).toHaveBeenCalledWith("PrismaClient created", {
       env: "test",
     });
-    expect(mockLog.debug).toHaveBeenCalledWith(
-      "PrismaClient cached on globalThis (dev mode)"
-    );
     expect(g.prisma).toBe(mod.prisma);
   });
 
@@ -58,7 +55,7 @@ describe("prisma", () => {
     );
   });
 
-  it("does NOT cache on globalThis in production", async () => {
+  it("caches on globalThis in production (singleton consistency)", async () => {
     const originalEnv = process.env.NODE_ENV;
     process.env.NODE_ENV = "production";
 
@@ -68,11 +65,8 @@ describe("prisma", () => {
     expect(mockLog.info).toHaveBeenCalledWith("PrismaClient created", {
       env: "production",
     });
-    expect(mockLog.debug).not.toHaveBeenCalledWith(
-      "PrismaClient cached on globalThis (dev mode)"
-    );
-    // globalThis.prisma should NOT have been set
-    expect(g.prisma).toBeUndefined();
+    // globalThis.prisma should be set in ALL environments now
+    expect(g.prisma).toBe(mod.prisma);
 
     process.env.NODE_ENV = originalEnv;
   });

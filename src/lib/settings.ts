@@ -73,11 +73,42 @@ export async function updateSettings(
   return result;
 }
 
+/** Shape returned by getEffectiveAIConfig(). */
+export interface EffectiveAIConfig {
+  provider: string;
+  model: string;
+  apiKey: string;
+  baseUrl: string;
+  embeddingProvider: string;
+  embeddingModel: string;
+  embeddingApiKey: string;
+  embeddingBaseUrl: string;
+}
+
+/**
+ * Resolve an API key for a given provider.
+ * Checks the DB column first, then falls back to the corresponding env var.
+ */
+function resolveApiKey(
+  provider: string,
+  settings: AppSettings | null,
+  envKey: string | undefined
+): string {
+  // Check DB first
+  const col = PROVIDER_KEY_COLUMN[provider];
+  const dbKey = col ? (settings?.[col] as string | null) : null;
+  if (dbKey) return dbKey;
+  // Fall back to env
+  const envKeyName = col ? (KEY_ENV_MAP[col as string] || "") : "";
+  if (envKeyName && process.env[envKeyName]) return process.env[envKeyName]!;
+  return envKey ?? "";
+}
+
 /**
  * Resolve the effective AI config (DB values take precedence over env vars).
  * This is the single source of truth used by both providers.ts and the RAG server.
  */
-export async function getEffectiveAIConfig() {
+export async function getEffectiveAIConfig(): Promise<EffectiveAIConfig> {
   log.debug("Resolving effective AI config");
   const s = await getSettings();
 
@@ -86,11 +117,11 @@ export async function getEffectiveAIConfig() {
   const baseUrl = s.openaiBaseUrl || process.env.OPENAI_BASE_URL || "";
 
   // Resolve API key: DB column for the active provider, then env var
+  const apiKey = resolveApiKey(provider, s, undefined);
+
   const col = PROVIDER_KEY_COLUMN[provider];
   const dbKey = col ? (s[col] as string | null) : null;
-  const envKeyName = KEY_ENV_MAP[col as string] || "";
-  const apiKey = dbKey || (envKeyName ? process.env[envKeyName] || "" : "");
-
+  const envKeyName = col ? (KEY_ENV_MAP[col as string] || "") : "";
   const keySource = dbKey ? "database" : envKeyName && process.env[envKeyName] ? "env" : "none";
 
   log.info("Effective AI config resolved", {
@@ -103,7 +134,7 @@ export async function getEffectiveAIConfig() {
 
   // Embedding — resolve provider, then derive defaults from it
   const embeddingProvider = s.embeddingProvider || process.env.EMBEDDING_PROVIDER || "";
-  const embeddingModel = s.embeddingModel || process.env.EMBEDDING_MODEL || "text-embedding-3-small";
+  const embeddingModel = s.embeddingModel || process.env.EMBEDDING_MODEL || (process.env.DEFAULT_EMBEDDING_MODEL ?? "text-embedding-3-small");
 
   // If an embedding provider is set, resolve its API key and base URL independently
   let embeddingApiKey = s.embeddingApiKey || process.env.EMBEDDING_API_KEY || "";
@@ -112,10 +143,7 @@ export async function getEffectiveAIConfig() {
   if (embeddingProvider && embeddingProvider !== provider) {
     // Resolve API key from the embedding provider's DB column / env var
     if (!embeddingApiKey) {
-      const embCol = PROVIDER_KEY_COLUMN[embeddingProvider];
-      const embDbKey = embCol ? (s[embCol] as string | null) : null;
-      const embEnvKeyName = KEY_ENV_MAP[embCol as string] || "";
-      embeddingApiKey = embDbKey || (embEnvKeyName ? process.env[embEnvKeyName] || "" : "");
+      embeddingApiKey = resolveApiKey(embeddingProvider, s, undefined);
     }
     // embeddingBaseUrl is left empty here — the RAG server / provider resolver
     // will fill it from PROVIDER_DEFAULTS using embeddingProvider

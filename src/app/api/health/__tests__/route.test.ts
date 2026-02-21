@@ -49,6 +49,27 @@ describe("GET /api/health", () => {
     process.env.RAG_SERVER_URL = originalEnv;
   });
 
+  it("uses HEALTH_CHECK_TIMEOUT environment variable when set", async () => {
+    const originalTimeout = process.env.HEALTH_CHECK_TIMEOUT;
+    process.env.HEALTH_CHECK_TIMEOUT = "5000";
+
+    const healthData = { status: "ok" };
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify(healthData), { status: 200 })
+    );
+
+    const res = await GET();
+    await res.json();
+
+    expect(res.status).toBe(200);
+    expect(mockLog.debug).toHaveBeenCalledWith(
+      "Health check started",
+      expect.objectContaining({ timeout: 5000 })
+    );
+
+    process.env.HEALTH_CHECK_TIMEOUT = originalTimeout;
+  });
+
   it("returns error status when RAG server is unreachable", async () => {
     vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("Connection refused"));
 

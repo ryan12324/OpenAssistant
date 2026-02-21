@@ -1,5 +1,6 @@
 import {
   resolveModel,
+  validateModelConfig,
   resolveModelFromSettings,
   sanitizeBaseUrl,
   getProviderList,
@@ -221,6 +222,76 @@ describe("resolveModel", () => {
       baseURL: "https://api.openai.com/v1",
       apiKey: "masked(sk-secret-key)",
     });
+  });
+});
+
+// ===========================================================================
+// validateModelConfig
+// ===========================================================================
+describe("validateModelConfig", () => {
+  it("throws for an unknown provider", () => {
+    const config: ModelConfig = {
+      provider: "nonexistent" as AIProvider,
+      model: "some-model",
+    };
+
+    expect(() => validateModelConfig(config)).toThrow("Unknown AI provider: nonexistent");
+    expect(mockLog.error).toHaveBeenCalledWith("Unknown AI provider requested", {
+      provider: "nonexistent",
+    });
+  });
+
+  it("returns resolved baseURL, apiKey, and modelId for a valid provider", () => {
+    const config: ModelConfig = {
+      provider: "openai",
+      model: "gpt-4o",
+      apiKey: "sk-test",
+      baseUrl: "https://custom.example.com/v1",
+    };
+
+    const result = validateModelConfig(config);
+
+    expect(result).toEqual({
+      baseURL: "https://custom.example.com/v1",
+      apiKey: "sk-test",
+      modelId: "gpt-4o",
+    });
+  });
+
+  it("falls back to provider defaults when config values are not provided", () => {
+    const config: ModelConfig = {
+      provider: "anthropic",
+      model: "",
+    };
+
+    const result = validateModelConfig(config);
+
+    expect(result.baseURL).toBe("https://api.anthropic.com/v1");
+    expect(result.modelId).toBe("claude-sonnet-4-5-20250929");
+  });
+
+  it("falls back to env var for apiKey when config.apiKey is not set", () => {
+    setEnv("OPENAI_API_KEY", "env-key-from-validate");
+
+    const config: ModelConfig = {
+      provider: "openai",
+      model: "gpt-4o",
+    };
+
+    const result = validateModelConfig(config);
+
+    expect(result.apiKey).toBe("env-key-from-validate");
+  });
+
+  it("returns empty string for apiKey for providers with no envKey (e.g., ollama)", () => {
+    const config: ModelConfig = {
+      provider: "ollama",
+      model: "llama3.1",
+    };
+
+    const result = validateModelConfig(config);
+
+    expect(result.apiKey).toBe("");
   });
 });
 
@@ -452,18 +523,22 @@ describe("getProviderList", () => {
     expect(list).toHaveLength(Object.keys(PROVIDER_DEFAULTS).length);
   });
 
-  it("returns entries with the correct shape", () => {
+  it("returns entries with the correct shape including name field", () => {
     const list = getProviderList();
 
     for (const entry of list) {
       expect(entry).toHaveProperty("id");
+      expect(entry).toHaveProperty("name");
       expect(entry).toHaveProperty("defaultModel");
       expect(entry).toHaveProperty("envKey");
       expect(entry).toHaveProperty("baseUrl");
       expect(typeof entry.id).toBe("string");
+      expect(typeof entry.name).toBe("string");
       expect(typeof entry.defaultModel).toBe("string");
       expect(typeof entry.envKey).toBe("string");
       expect(typeof entry.baseUrl).toBe("string");
+      // name should match id
+      expect(entry.name).toBe(entry.id);
     }
   });
 
@@ -504,6 +579,20 @@ describe("PROVIDER_DEFAULTS", () => {
       expect(PROVIDER_DEFAULTS[provider]).toHaveProperty("defaultModel");
       expect(PROVIDER_DEFAULTS[provider]).toHaveProperty("envKey");
     }
+  });
+
+  it("uses default base URL for ollama when OLLAMA_BASE_URL env is not set", () => {
+    // OLLAMA_BASE_URL is read at module load time; if not set, defaults apply
+    expect(PROVIDER_DEFAULTS.ollama.baseUrl).toBe(
+      process.env.OLLAMA_BASE_URL ?? "http://localhost:11434/v1"
+    );
+  });
+
+  it("uses default base URL for lmstudio when LMSTUDIO_BASE_URL env is not set", () => {
+    // LMSTUDIO_BASE_URL is read at module load time; if not set, defaults apply
+    expect(PROVIDER_DEFAULTS.lmstudio.baseUrl).toBe(
+      process.env.LMSTUDIO_BASE_URL ?? "http://localhost:1234/v1"
+    );
   });
 });
 

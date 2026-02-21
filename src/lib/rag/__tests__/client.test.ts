@@ -79,6 +79,27 @@ describe("ragClient", () => {
       );
       expect(mockLogger.error).toHaveBeenCalled();
     });
+
+    it("throws on 404 HTTP response with body in error message", async () => {
+      mockFetch.mockResolvedValue(mockErrorResponse(404, "Not Found"));
+
+      await expect(ragClient.health()).rejects.toThrow(
+        "RAG server error (404): Not Found"
+      );
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        "ragFetch failed",
+        expect.objectContaining({ status: 404, body: "Not Found" })
+      );
+    });
+
+    it("does not parse JSON when response is not ok", async () => {
+      const response = mockErrorResponse(502, "Bad Gateway");
+      mockFetch.mockResolvedValue(response);
+
+      await expect(ragClient.health()).rejects.toThrow("RAG server error (502)");
+      // json() should NOT have been called since res.ok is false
+      expect(response.json).not.toHaveBeenCalled();
+    });
   });
 
   // ── health ──────────────────────────────────────────────────────────

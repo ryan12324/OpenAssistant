@@ -70,8 +70,8 @@ export const fetchUrl: SkillDefinition = {
 
     try {
       const response = await fetch(url, {
-        headers: { "User-Agent": "OpenAssistant/0.1" },
-        signal: AbortSignal.timeout(10000),
+        headers: { "User-Agent": process.env.USER_AGENT ?? "OpenAssistant/0.1" },
+        signal: AbortSignal.timeout(Number(process.env.FETCH_TIMEOUT_MS ?? "10000")),
       });
 
       if (!response.ok) {
@@ -98,7 +98,7 @@ export const fetchUrl: SkillDefinition = {
         .replace(/<[^>]+>/g, " ")
         .replace(/\s+/g, " ")
         .trim()
-        .slice(0, 5000);
+        .slice(0, Number(process.env.MAX_CONTENT_LENGTH ?? "5000"));
 
       return {
         success: true,

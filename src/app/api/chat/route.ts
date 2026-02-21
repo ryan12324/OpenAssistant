@@ -7,8 +7,14 @@ import { memoryManager } from "@/lib/rag/memory";
 import { maybeCompact } from "@/lib/compaction";
 import { resolveModelFromSettings } from "@/lib/ai/providers";
 import { getLogger } from "@/lib/logger";
+import { handleApiError } from "@/lib/api-utils";
 
 const log = getLogger("api.chat");
+
+interface UserMessage {
+  role: "system" | "user" | "assistant" | "data";
+  content: string;
+}
 
 export async function POST(req: NextRequest) {
   const startTime = Date.now();
@@ -23,8 +29,7 @@ export async function POST(req: NextRequest) {
       messages,
       conversationId,
     }: {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      messages: any[];
+      messages: UserMessage[];
       conversationId?: string;
     } = body;
 
@@ -42,9 +47,7 @@ export async function POST(req: NextRequest) {
     let convId = conversationId;
     const isNewConversation = !convId;
     if (!convId) {
-      const firstContent = typeof messages[0]?.content === "string"
-        ? messages[0].content
-        : "";
+      const firstContent = messages[0]?.content ?? "";
       const conversation = await prisma.conversation.create({
         data: {
           userId,
@@ -55,21 +58,21 @@ export async function POST(req: NextRequest) {
       log.info("New conversation created", { convId, userId });
     }
 
+    // At this point convId is guaranteed to be defined
+    const resolvedConvId = convId;
+
     // Save the user message
     const lastMessage = messages[messages.length - 1];
     if (lastMessage?.role === "user") {
-      const content = typeof lastMessage.content === "string"
-        ? lastMessage.content
-        : JSON.stringify(lastMessage.content);
       await prisma.message.create({
         data: {
-          conversationId: convId,
+          conversationId: resolvedConvId,
           role: "user",
-          content,
+          content: lastMessage.content,
           source: "web",
         },
       });
-      log.debug("User message saved", { conversationId: convId });
+      log.debug("User message saved", { conversationId: resolvedConvId });
     }
 
     // Recall relevant memories for context
@@ -78,9 +81,7 @@ export async function POST(req: NextRequest) {
       log.debug("Attempting memory recall", { userId });
       const userQuery = messages
         .filter((m: { role: string }) => m.role === "user")
-        .map((m: { content: unknown }) =>
-          typeof m.content === "string" ? m.content : ""
-        )
+        .map((m: { content: string }) => m.content)
         .slice(-3)
         .join(" ");
       memoryContext = await memoryManager.recall({
@@ -103,14 +104,14 @@ export async function POST(req: NextRequest) {
     // Stream the AI response
     log.info("Starting AI stream", {
       userId,
-      conversationId: convId,
+      conversationId: resolvedConvId,
       messageCount: coreMessages.length,
     });
 
     const result = await streamAgentResponse({
       messages: coreMessages,
       userId,
-      conversationId: convId,
+      conversationId: resolvedConvId,
       memoryContext: memoryContext || undefined,
     });
 
@@ -120,42 +121,40 @@ export async function POST(req: NextRequest) {
       log.info("AI stream complete", {
         responseLength: text?.length ?? 0,
         durationMs: streamDuration,
-        conversationId: convId,
+        conversationId: resolvedConvId,
       });
 
       if (text) {
         try {
           await prisma.message.create({
             data: {
-              conversationId: convId!,
+              conversationId: resolvedConvId,
               role: "assistant",
               content: text,
               source: "web",
             },
           });
-          log.debug("Assistant message saved", { conversationId: convId });
+          log.debug("Assistant message saved", { conversationId: resolvedConvId });
         } catch (err) {
           log.error("Failed to save assistant message", {
-            conversationId: convId,
+            conversationId: resolvedConvId,
             error: err instanceof Error ? err.message : String(err),
           });
         }
 
         // Auto-save short-term memory of the interaction
         try {
-          const userContent = typeof lastMessage?.content === "string"
-            ? lastMessage.content
-            : "";
+          const userContent = lastMessage?.content ?? "";
           await memoryManager.store({
             userId,
             content: `User asked: "${userContent.slice(0, 200)}"\nAssistant responded about: ${text.slice(0, 200)}`,
             type: "short_term",
           });
-          log.debug("Memory stored successfully", { userId, conversationId: convId });
+          log.debug("Memory stored successfully", { userId, conversationId: resolvedConvId });
         } catch (err) {
           log.warn("Memory store failed", {
             userId,
-            conversationId: convId,
+            conversationId: resolvedConvId,
             error: err instanceof Error ? err.message : String(err),
           });
         }
@@ -163,7 +162,7 @@ export async function POST(req: NextRequest) {
         // Generate an AI title for new conversations
         if (isNewConversation) {
           try {
-            log.debug("Generating title for new conversation", { conversationId: convId });
+            log.debug("Generating title for new conversation", { conversationId: resolvedConvId });
             const userContent = typeof lastMessage?.content === "string"
               ? lastMessage.content
               : "";
@@ -184,14 +183,14 @@ export async function POST(req: NextRequest) {
             const title = titleResult.text.trim().slice(0, 80);
             if (title) {
               await prisma.conversation.update({
-                where: { id: convId! },
+                where: { id: resolvedConvId },
                 data: { title },
               });
-              log.info("Conversation title generated", { conversationId: convId, title });
+              log.info("Conversation title generated", { conversationId: resolvedConvId, title });
             }
           } catch (err) {
             log.warn("Title generation failed", {
-              conversationId: convId,
+              conversationId: resolvedConvId,
               error: err instanceof Error ? err.message : String(err),
             });
           }
@@ -199,34 +198,26 @@ export async function POST(req: NextRequest) {
 
         // Compact conversation if it has grown too large
         try {
-          await maybeCompact(convId!, userId);
+          await maybeCompact(resolvedConvId, userId);
         } catch (err) {
           log.warn("Compaction failed", {
-            conversationId: convId,
+            conversationId: resolvedConvId,
             error: err instanceof Error ? err.message : String(err),
           });
         }
       }
+    }).catch((err) => {
+      log.error("Post-stream processing failed", { error: err });
     });
 
-    log.info("Returning stream response", { conversationId: convId, userId });
+    log.info("Returning stream response", { conversationId: resolvedConvId, userId });
 
     return result.toDataStreamResponse({
       headers: {
-        "X-Conversation-Id": convId,
+        "X-Conversation-Id": resolvedConvId,
       },
     });
   } catch (error) {
-    const duration = Date.now() - startTime;
-    if (error instanceof Error && error.message === "Unauthorized") {
-      log.warn("Unauthorized request", { durationMs: duration });
-      return Response.json({ error: "Unauthorized" }, { status: 401 });
-    }
-    log.error("Chat error", {
-      durationMs: duration,
-      error: error instanceof Error ? error.message : String(error),
-      stack: error instanceof Error ? error.stack : undefined,
-    });
-    return Response.json({ error: "Internal server error" }, { status: 500 });
+    return handleApiError(error, "process chat");
   }
 }

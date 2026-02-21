@@ -3,6 +3,7 @@ import { requireSession } from "@/lib/auth-server";
 import { integrationRegistry } from "@/lib/integrations";
 import { prisma } from "@/lib/prisma";
 import { getLogger } from "@/lib/logger";
+import { handleApiError } from "@/lib/api-utils";
 
 const log = getLogger("api.integrations");
 
@@ -51,12 +52,7 @@ export async function GET() {
 
     return Response.json({ integrations });
   } catch (error) {
-    if (error instanceof Error && error.message === "Unauthorized") {
-      log.warn("Unauthorized access attempt to GET /api/integrations");
-      return Response.json({ error: "Unauthorized" }, { status: 401 });
-    }
-    log.error("Failed to list integrations", { error });
-    return Response.json({ error: "Internal server error" }, { status: 500 });
+    return handleApiError(error, "list integrations");
   }
 }
 
@@ -138,11 +134,6 @@ export async function POST(req: NextRequest) {
     log.info("Integration saved", { integrationId, enabled });
     return Response.json({ status: "ok", integrationId, enabled });
   } catch (error) {
-    if (error instanceof Error && error.message === "Unauthorized") {
-      log.warn("Unauthorized access attempt to POST /api/integrations");
-      return Response.json({ error: "Unauthorized" }, { status: 401 });
-    }
-    log.error("Failed to configure integration", { error });
-    return Response.json({ error: "Internal server error" }, { status: 500 });
+    return handleApiError(error, "configure integration");
   }
 }

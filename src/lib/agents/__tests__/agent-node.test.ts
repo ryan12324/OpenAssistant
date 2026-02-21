@@ -54,9 +54,16 @@ vi.mock("@/lib/integrations", () => ({
   },
 }));
 
-vi.mock("@/lib/logger", () => ({
-  default: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() },
-}));
+vi.mock("@/lib/schema-builder", async () => {
+  const actual = await vi.importActual("@/lib/schema-builder");
+  return actual;
+});
+
+vi.mock("@/lib/logger", () => {
+  const logObj = { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn(), child: vi.fn() };
+  logObj.child.mockReturnValue(logObj);
+  return { getLogger: () => logObj };
+});
 
 // ─── Import under test ──────────────────────────────────────
 import { AgentNode } from "@/lib/agents/agent-node";

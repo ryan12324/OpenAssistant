@@ -1,12 +1,16 @@
 import { generateText } from "ai";
 import { AgentNode } from "./agent-node";
 import { resolveModelFromSettings } from "@/lib/ai/providers";
+import { initializeNodes } from "./utils";
 import type {
   SwarmDefinition,
   SwarmRunConfig,
   SwarmRunResult,
   AgentEvent,
 } from "./types";
+import { getLogger } from "@/lib/logger";
+
+const log = getLogger("agents.swarm");
 
 /**
  * SwarmOrchestrator — Runs multiple agents in parallel on the same (or different) tasks.
@@ -24,10 +28,7 @@ export class SwarmOrchestrator {
 
   constructor(definition: SwarmDefinition) {
     this.definition = definition;
-    this.nodes = new Map();
-    for (const agent of definition.agents) {
-      this.nodes.set(agent.id, new AgentNode(agent));
-    }
+    this.nodes = initializeNodes(definition.agents);
   }
 
   /**
@@ -35,8 +36,14 @@ export class SwarmOrchestrator {
    */
   async run(config: SwarmRunConfig): Promise<SwarmRunResult> {
     const start = Date.now();
+    log.info("Swarm run started", {
+      swarmId: this.definition.id,
+      agentCount: this.definition.agents.length,
+      aggregation: this.definition.aggregation,
+      taskLength: config.task.length,
+    });
 
-    const timeoutMs = this.definition.agentTimeoutMs || 60000;
+    const timeoutMs = this.definition.agentTimeoutMs ?? Number(process.env.SWARM_TIMEOUT_MS ?? "60000");
 
     // Launch all agents in parallel
     const promises = this.definition.agents.map(async (agent) => {
@@ -64,11 +71,19 @@ export class SwarmOrchestrator {
           durationMs: result.durationMs,
         };
       } catch (error) {
+        const durationMs = Date.now() - agentStart;
+        log.error("Swarm agent failed", {
+          swarmId: this.definition.id,
+          agentId: agent.id,
+          agentName: agent.name,
+          durationMs,
+          error: error instanceof Error ? error.message : String(error),
+        });
         return {
           agentId: agent.id,
           agentName: agent.name,
           output: "",
-          durationMs: Date.now() - agentStart,
+          durationMs,
           error: error instanceof Error ? error.message : "Unknown error",
         };
       }
@@ -78,8 +93,25 @@ export class SwarmOrchestrator {
 
     // Check minimum completions
     const successful = agentResults.filter((r) => !r.error);
+    const failed = agentResults.filter((r) => r.error);
     const minCompletions = this.definition.minCompletions || 1;
+
+    if (failed.length > 0) {
+      log.warn("Some swarm agents failed", {
+        swarmId: this.definition.id,
+        successCount: successful.length,
+        failCount: failed.length,
+        failedAgents: failed.map((r) => ({ id: r.agentId, error: r.error })),
+      });
+    }
+
     if (successful.length < minCompletions) {
+      log.error("Swarm failed: insufficient completions", {
+        swarmId: this.definition.id,
+        successCount: successful.length,
+        minCompletions,
+        durationMs: Date.now() - start,
+      });
       return {
         swarmId: this.definition.id,
         task: config.task,
@@ -91,7 +123,17 @@ export class SwarmOrchestrator {
     }
 
     // Aggregate
+    log.debug("Aggregating results", { swarmId: this.definition.id, aggregation: this.definition.aggregation, resultCount: successful.length });
     const finalOutput = await this.aggregate(config.task, successful);
+
+    const durationMs = Date.now() - start;
+    log.info("Swarm run completed", {
+      swarmId: this.definition.id,
+      durationMs,
+      successCount: successful.length,
+      failCount: failed.length,
+      outputLength: finalOutput.length,
+    });
 
     return {
       swarmId: this.definition.id,
@@ -99,7 +141,7 @@ export class SwarmOrchestrator {
       aggregation: this.definition.aggregation,
       finalOutput,
       agentResults,
-      durationMs: Date.now() - start,
+      durationMs,
     };
   }
 
@@ -238,6 +280,8 @@ export class SwarmOrchestrator {
     task: string,
     results: { agentName: string; output: string }[]
   ): Promise<string> {
+    log.info("Synthesizing swarm outputs via LLM", { swarmId: this.definition.id, resultCount: results.length });
+    const start = Date.now();
     const outputs = results
       .map((r) => `**${r.agentName}:**\n${r.output}`)
       .join("\n\n---\n\n");
@@ -251,44 +295,60 @@ export class SwarmOrchestrator {
           userId: "system",
           conversationId: "synthesis",
         });
+        log.info("Synthesis completed via designated synthesizer", { swarmId: this.definition.id, durationMs: Date.now() - start });
         return result.output;
       }
+      log.warn("Designated synthesizer not found, falling back to LLM", { synthesizerId: this.definition.synthesizerId });
     }
 
-    const result = await generateText({
-      model: await resolveModelFromSettings(),
-      messages: [
-        {
-          role: "system",
-          content:
-            "You are a synthesis agent. Combine these parallel agent outputs into a single, clear response. Take the best elements from each.",
-        },
-        { role: "user", content: `Task: ${task}\n\nOutputs:\n\n${outputs}` },
-      ],
-    });
-    return result.text;
+    try {
+      const result = await generateText({
+        model: await resolveModelFromSettings(),
+        messages: [
+          {
+            role: "system",
+            content:
+              "You are a synthesis agent. Combine these parallel agent outputs into a single, clear response. Take the best elements from each.",
+          },
+          { role: "user", content: `Task: ${task}\n\nOutputs:\n\n${outputs}` },
+        ],
+      });
+      log.info("Synthesis LLM call completed", { swarmId: this.definition.id, durationMs: Date.now() - start, outputLength: result.text.length });
+      return result.text;
+    } catch (err) {
+      log.error("Synthesis LLM call failed", { swarmId: this.definition.id, durationMs: Date.now() - start, error: err instanceof Error ? err.message : String(err) });
+      throw err;
+    }
   }
 
   private async aggregateBest(
     task: string,
     results: { agentName: string; output: string }[]
   ): Promise<string> {
+    log.info("Selecting best output via LLM", { swarmId: this.definition.id, resultCount: results.length });
+    const start = Date.now();
     const outputs = results
       .map((r, i) => `Option ${i + 1} (${r.agentName}):\n${r.output}`)
       .join("\n\n---\n\n");
 
-    const result = await generateText({
-      model: await resolveModelFromSettings(),
-      messages: [
-        {
-          role: "system",
-          content:
-            "You are a judge. Pick the best response from the options below and return it. Briefly explain why at the end.",
-        },
-        { role: "user", content: `Task: ${task}\n\nOptions:\n\n${outputs}` },
-      ],
-    });
-    return result.text;
+    try {
+      const result = await generateText({
+        model: await resolveModelFromSettings(),
+        messages: [
+          {
+            role: "system",
+            content:
+              "You are a judge. Pick the best response from the options below and return it. Briefly explain why at the end.",
+          },
+          { role: "user", content: `Task: ${task}\n\nOptions:\n\n${outputs}` },
+        ],
+      });
+      log.info("Best-selection LLM call completed", { swarmId: this.definition.id, durationMs: Date.now() - start, outputLength: result.text.length });
+      return result.text;
+    } catch (err) {
+      log.error("Best-selection LLM call failed", { swarmId: this.definition.id, durationMs: Date.now() - start, error: err instanceof Error ? err.message : String(err) });
+      throw err;
+    }
   }
 
   private aggregateMerge(

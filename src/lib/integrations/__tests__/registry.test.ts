@@ -247,6 +247,7 @@ vi.mock("@/lib/integrations/social/email", () => ({
 }));
 
 import { integrationRegistry } from "@/lib/integrations/registry";
+import type { HydrationResult } from "@/lib/integrations/registry";
 import type { IntegrationDefinition, IntegrationConfig, IntegrationInstance } from "@/lib/integrations/types";
 
 describe("IntegrationRegistry (via exported singleton)", () => {
@@ -368,28 +369,31 @@ describe("IntegrationRegistry (via exported singleton)", () => {
   });
 
   describe("hydrateUserIntegrations", () => {
-    it("should skip if user already hydrated", async () => {
+    it("should skip if user already hydrated and return empty result", async () => {
       // First hydration
       mockPrisma.skillConfig.findMany.mockResolvedValueOnce([]);
       await integrationRegistry.hydrateUserIntegrations("hydrateUser1");
 
       // Second call should be cached
-      await integrationRegistry.hydrateUserIntegrations("hydrateUser1");
+      const result = await integrationRegistry.hydrateUserIntegrations("hydrateUser1");
       // findMany should only be called once
       expect(mockPrisma.skillConfig.findMany).toHaveBeenCalledTimes(1);
+      expect(result).toEqual({ loaded: [], failed: [] });
     });
 
-    it("should hydrate configs from DB and create instances", async () => {
+    it("should hydrate configs from DB and return loaded integrations", async () => {
       mockPrisma.skillConfig.findMany.mockResolvedValueOnce([
         { skillId: "telegram", enabled: true, config: JSON.stringify({ botToken: "test-token" }) },
       ]);
 
-      await integrationRegistry.hydrateUserIntegrations("hydrateUser2");
+      const result = await integrationRegistry.hydrateUserIntegrations("hydrateUser2");
       // Should have created a user instance
       expect(mockLog.info).toHaveBeenCalledWith(
         "Creating user integration instance",
         expect.objectContaining({ userId: "hydrateUser2", integrationId: "telegram" })
       );
+      expect(result.loaded).toContain("telegram");
+      expect(result.failed).toEqual([]);
     });
 
     it("should skip configs with no config field", async () => {
@@ -417,23 +421,28 @@ describe("IntegrationRegistry (via exported singleton)", () => {
       );
     });
 
-    it("should handle DB errors gracefully", async () => {
+    it("should handle DB errors gracefully and return empty result", async () => {
       mockPrisma.skillConfig.findMany.mockRejectedValueOnce(new Error("DB down"));
 
-      await integrationRegistry.hydrateUserIntegrations("hydrateUser5");
+      const result = await integrationRegistry.hydrateUserIntegrations("hydrateUser5");
       expect(mockLog.error).toHaveBeenCalledWith(
         "Failed to hydrate integrations",
         expect.objectContaining({ userId: "hydrateUser5" })
       );
+      expect(result).toEqual({ loaded: [], failed: [] });
     });
 
-    it("should handle individual integration hydration errors", async () => {
+    it("should handle individual integration hydration errors and report in failed", async () => {
       mockPrisma.skillConfig.findMany.mockResolvedValueOnce([
         { skillId: "telegram", enabled: true, config: "invalid json" },
       ]);
 
-      await integrationRegistry.hydrateUserIntegrations("hydrateUser6");
+      const result = await integrationRegistry.hydrateUserIntegrations("hydrateUser6");
       expect(mockLog.warn).toHaveBeenCalled();
+      expect(result.loaded).toEqual([]);
+      expect(result.failed).toHaveLength(1);
+      expect(result.failed[0].id).toBe("telegram");
+      expect(result.failed[0].error).toBeDefined();
     });
 
     it("should skip already active user instances", async () => {
@@ -445,8 +454,22 @@ describe("IntegrationRegistry (via exported singleton)", () => {
         { skillId: "telegram", enabled: true, config: JSON.stringify({ botToken: "y" }) },
       ]);
 
-      await integrationRegistry.hydrateUserIntegrations("hydrateUser7");
+      const result = await integrationRegistry.hydrateUserIntegrations("hydrateUser7");
       // Should log completion with 0 hydrated since it was already active
+      expect(result.loaded).toEqual([]);
+      expect(result.failed).toEqual([]);
+    });
+
+    it("should return mixed loaded and failed results", async () => {
+      mockPrisma.skillConfig.findMany.mockResolvedValueOnce([
+        { skillId: "discord", enabled: true, config: JSON.stringify({ botToken: "good-token" }) },
+        { skillId: "slack", enabled: true, config: "not valid json" },
+      ]);
+
+      const result = await integrationRegistry.hydrateUserIntegrations("hydrateUser8");
+      expect(result.loaded).toContain("discord");
+      expect(result.failed).toHaveLength(1);
+      expect(result.failed[0].id).toBe("slack");
     });
   });
 

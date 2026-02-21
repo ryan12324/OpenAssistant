@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { requireSession } from "@/lib/auth-server";
 import { prisma } from "@/lib/prisma";
 import { getLogger } from "@/lib/logger";
+import { handleApiError } from "@/lib/api-utils";
 
 const log = getLogger("api.conversations");
 
@@ -28,12 +29,7 @@ export async function GET() {
     log.info("Conversations listed successfully", { count: conversations.length });
     return Response.json(conversations);
   } catch (error) {
-    if (error instanceof Error && error.message === "Unauthorized") {
-      log.warn("Unauthorized request to list conversations");
-      return Response.json({ error: "Unauthorized" }, { status: 401 });
-    }
-    log.error("Failed to list conversations", { error });
-    return Response.json({ error: "Internal server error" }, { status: 500 });
+    return handleApiError(error, "list conversations");
   }
 }
 
@@ -54,11 +50,6 @@ export async function DELETE(req: NextRequest) {
     log.info("Conversation deleted successfully", { conversationId });
     return Response.json({ status: "ok" });
   } catch (error) {
-    if (error instanceof Error && error.message === "Unauthorized") {
-      log.warn("Unauthorized request to delete conversation");
-      return Response.json({ error: "Unauthorized" }, { status: 401 });
-    }
-    log.error("Failed to delete conversation", { error });
-    return Response.json({ error: "Internal server error" }, { status: 500 });
+    return handleApiError(error, "delete conversation");
   }
 }

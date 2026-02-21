@@ -7,6 +7,7 @@ import { resolveModelFromSettings } from "@/lib/ai/providers";
 import { audit } from "@/lib/audit";
 import { mcpManager } from "@/lib/mcp/client";
 import { getToolApprovalRequirement } from "@/lib/mcp/permissions";
+import { buildZodSchemaFromParams, buildZodSchemaFromJsonSchema } from "@/lib/schema-builder";
 import type { SkillContext, SkillResult } from "@/lib/skills/types";
 import { getLogger } from "@/lib/logger";
 
@@ -40,6 +41,29 @@ Guidelines:
 7. **Use MCP tools**: You have access to tools from connected MCP servers (external services). These tools are prefixed with "mcp_" in their names. Use them when relevant to the user's request.`;
 
 /**
+ * Hydrates integrations, MCP connections, and builds initial system messages.
+ */
+async function initializeAgentContext(
+  userId: string,
+  memoryContext: string | undefined,
+  systemPrompt: string
+): Promise<{ role: "system"; content: string }[]> {
+  log.debug("hydrating user integrations", { userId });
+  await integrationRegistry.hydrateUserIntegrations(userId);
+  log.debug("hydrating MCP connections", { userId });
+  await mcpManager.hydrateUserConnections(userId);
+  await mcpManager.hydrateGlobalConnections();
+
+  const messages: { role: "system"; content: string }[] = [
+    { role: "system", content: systemPrompt },
+  ];
+  if (memoryContext) {
+    messages.push({ role: "system", content: `Here is what you remember about this user:\n${memoryContext}` });
+  }
+  return messages;
+}
+
+/**
  * Build Zod schemas dynamically from skill parameters for the Vercel AI SDK.
  * Includes both built-in skills and skills from connected integrations.
  */
@@ -53,22 +77,7 @@ function buildTools(context: SkillContext) {
   for (const skill of skillRegistry.getAll()) {
     log.debug("registering built-in skill", { skillId: skill.id });
 
-    const shape: Record<string, z.ZodTypeAny> = {};
-
-    for (const param of skill.parameters) {
-      let schema: z.ZodTypeAny;
-      switch (param.type) {
-        case "number":
-          schema = z.number().describe(param.description);
-          break;
-        case "boolean":
-          schema = z.boolean().describe(param.description);
-          break;
-        default:
-          schema = z.string().describe(param.description);
-      }
-      shape[param.name] = param.required ? schema : schema.optional();
-    }
+    const shape = buildZodSchemaFromParams(skill.parameters);
 
     tools[skill.id] = tool({
       description: skill.description,
@@ -128,22 +137,7 @@ function buildTools(context: SkillContext) {
         integrationName: instance.definition.name,
       });
 
-      const shape: Record<string, z.ZodTypeAny> = {};
-
-      for (const param of integrationSkill.parameters) {
-        let schema: z.ZodTypeAny;
-        switch (param.type) {
-          case "number":
-            schema = z.number().describe(param.description);
-            break;
-          case "boolean":
-            schema = z.boolean().describe(param.description);
-            break;
-          default:
-            schema = z.string().describe(param.description);
-        }
-        shape[param.name] = param.required ? schema : schema.optional();
-      }
+      const shape = buildZodSchemaFromParams(integrationSkill.parameters);
 
       tools[integrationSkill.id] = tool({
         description: `[${instance.definition.name}] ${integrationSkill.description}`,
@@ -214,35 +208,13 @@ function buildTools(context: SkillContext) {
     });
 
     // Convert JSON Schema to Zod schema
-    const shape: Record<string, z.ZodTypeAny> = {};
     const props = (mcpTool.inputSchema?.properties || {}) as Record<
       string,
       { type?: string; description?: string }
     >;
     const required = (mcpTool.inputSchema?.required || []) as string[];
 
-    for (const [propName, propDef] of Object.entries(props)) {
-      let schema: z.ZodTypeAny;
-      switch (propDef.type) {
-        case "number":
-        case "integer":
-          schema = z.number();
-          break;
-        case "boolean":
-          schema = z.boolean();
-          break;
-        case "array":
-          schema = z.array(z.unknown());
-          break;
-        case "object":
-          schema = z.record(z.unknown());
-          break;
-        default:
-          schema = z.string();
-      }
-      if (propDef.description) schema = schema.describe(propDef.description);
-      shape[propName] = required.includes(propName) ? schema : schema.optional();
-    }
+    const shape = buildZodSchemaFromJsonSchema(props, required);
 
     const approval = getToolApprovalRequirement(mcpTool);
     const desc = [
@@ -353,25 +325,11 @@ export async function streamAgentResponse(params: {
     conversationId: params.conversationId,
   };
 
-  // Hydrate user's enabled integrations from DB so their tools are available
-  log.debug("hydrating user integrations", { userId: params.userId });
-  await integrationRegistry.hydrateUserIntegrations(params.userId);
-
-  // Hydrate MCP server connections
-  log.debug("hydrating MCP connections", { userId: params.userId });
-  await mcpManager.hydrateUserConnections(params.userId);
-  await mcpManager.hydrateGlobalConnections();
-
-  const systemMessages: { role: "system"; content: string }[] = [
-    { role: "system", content: SYSTEM_PROMPT },
-  ];
-
-  if (params.memoryContext) {
-    systemMessages.push({
-      role: "system",
-      content: `Here is what you remember about this user from previous conversations:\n\n${params.memoryContext}`,
-    });
-  }
+  const systemMessages = await initializeAgentContext(
+    params.userId,
+    params.memoryContext,
+    SYSTEM_PROMPT,
+  );
 
   const allMessages = [...systemMessages, ...params.messages];
 
@@ -411,25 +369,11 @@ export async function generateAgentResponse(params: {
     conversationId: params.conversationId,
   };
 
-  // Hydrate user's enabled integrations from DB so their tools are available
-  log.debug("hydrating user integrations", { userId: params.userId });
-  await integrationRegistry.hydrateUserIntegrations(params.userId);
-
-  // Hydrate MCP server connections
-  log.debug("hydrating MCP connections", { userId: params.userId });
-  await mcpManager.hydrateUserConnections(params.userId);
-  await mcpManager.hydrateGlobalConnections();
-
-  const systemMessages: { role: "system"; content: string }[] = [
-    { role: "system", content: SYSTEM_PROMPT },
-  ];
-
-  if (params.memoryContext) {
-    systemMessages.push({
-      role: "system",
-      content: `Here is what you remember about this user:\n\n${params.memoryContext}`,
-    });
-  }
+  const systemMessages = await initializeAgentContext(
+    params.userId,
+    params.memoryContext,
+    SYSTEM_PROMPT,
+  );
 
   const allMessages = [...systemMessages, ...params.messages];
 

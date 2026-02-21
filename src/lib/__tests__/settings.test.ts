@@ -44,6 +44,7 @@ import {
   updateSettings,
   getEffectiveAIConfig,
   PROVIDER_KEY_COLUMN,
+  type EffectiveAIConfig,
 } from "@/lib/settings";
 
 // ---------------------------------------------------------------------------
@@ -103,6 +104,7 @@ const ENV_KEYS_TO_CLEAN = [
   "EMBEDDING_MODEL",
   "EMBEDDING_API_KEY",
   "EMBEDDING_BASE_URL",
+  "DEFAULT_EMBEDDING_MODEL",
 ];
 
 let savedEnv: Record<string, string | undefined> = {};
@@ -499,10 +501,25 @@ describe("getEffectiveAIConfig", () => {
       expect(cfg.embeddingModel).toBe("env-embedding");
     });
 
-    it('defaults to "text-embedding-3-small"', async () => {
+    it('defaults to "text-embedding-3-small" when no env vars are set', async () => {
       setupSettings({ embeddingModel: null });
       const cfg = await getEffectiveAIConfig();
       expect(cfg.embeddingModel).toBe("text-embedding-3-small");
+    });
+
+    it("uses DEFAULT_EMBEDDING_MODEL env var when EMBEDDING_MODEL is not set", async () => {
+      setupSettings({ embeddingModel: null });
+      process.env.DEFAULT_EMBEDDING_MODEL = "custom-default-embedding";
+      const cfg = await getEffectiveAIConfig();
+      expect(cfg.embeddingModel).toBe("custom-default-embedding");
+    });
+
+    it("prefers EMBEDDING_MODEL over DEFAULT_EMBEDDING_MODEL", async () => {
+      setupSettings({ embeddingModel: null });
+      process.env.EMBEDDING_MODEL = "env-embedding";
+      process.env.DEFAULT_EMBEDDING_MODEL = "custom-default-embedding";
+      const cfg = await getEffectiveAIConfig();
+      expect(cfg.embeddingModel).toBe("env-embedding");
     });
   });
 
@@ -572,6 +589,19 @@ describe("getEffectiveAIConfig", () => {
   // -----------------------------------------------------------------------
   // Full return shape
   // -----------------------------------------------------------------------
+
+  it("returns a value matching the EffectiveAIConfig interface", async () => {
+    setupSettings({ aiProvider: "openai", openaiApiKey: "sk-test" });
+    const cfg: EffectiveAIConfig = await getEffectiveAIConfig();
+    expect(cfg).toHaveProperty("provider");
+    expect(cfg).toHaveProperty("model");
+    expect(cfg).toHaveProperty("apiKey");
+    expect(cfg).toHaveProperty("baseUrl");
+    expect(cfg).toHaveProperty("embeddingProvider");
+    expect(cfg).toHaveProperty("embeddingModel");
+    expect(cfg).toHaveProperty("embeddingApiKey");
+    expect(cfg).toHaveProperty("embeddingBaseUrl");
+  });
 
   it("returns the full config shape with all fields", async () => {
     setupSettings({
