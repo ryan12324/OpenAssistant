@@ -26,6 +26,7 @@ model User {
   channelLinks  ChannelLink[]
   memories      Memory[]
   skillConfigs  SkillConfig[]
+  auditLogs     AuditLog[]
 }
 
 model Session {
@@ -166,4 +167,47 @@ model SkillConfig {
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, skillId])
+}
+
+// ─── Gateway Pattern: Job Queue ─────────────────────────────
+
+/// Persistent job queue backed by SQLite. Inbound webhook messages are
+/// enqueued here so the HTTP handler can return immediately. A background
+/// worker polls and processes jobs asynchronously.
+model Job {
+  id         String   @id @default(cuid())
+  type       String   // "inbound_message" | "compact_conversation" | ...
+  status     String   @default("pending") // "pending" | "processing" | "completed" | "failed"
+  payload    String   // JSON
+  result     String?  // JSON
+  attempts   Int      @default(0)
+  maxRetries Int      @default(3)
+  error      String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  userId String?
+
+  @@index([status, createdAt])
+}
+
+// ─── Harness: Audit Log ─────────────────────────────────────
+
+/// Records every tool call / skill execution for security auditing.
+model AuditLog {
+  id         String   @id @default(cuid())
+  action     String   // "tool_call" | "skill_execute" | "memory_store" | ...
+  skillId    String?
+  input      String?  // JSON (sanitized)
+  output     String?  // JSON (truncated)
+  source     String?  // "web" | "telegram" | "agent" | ...
+  durationMs Int?
+  success    Boolean  @default(true)
+  createdAt  DateTime @default(now())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([action, createdAt])
 }

@@ -3,6 +3,7 @@ import { requireSession } from "@/lib/auth-server";
 import { prisma } from "@/lib/prisma";
 import { streamAgentResponse } from "@/lib/ai/agent";
 import { memoryManager } from "@/lib/rag/memory";
+import { maybeCompact } from "@/lib/compaction";
 
 export async function POST(req: NextRequest) {
   try {
@@ -92,6 +93,13 @@ export async function POST(req: NextRequest) {
             content: `User asked: "${lastMessage?.content?.slice(0, 200)}"\nAssistant responded about: ${text.slice(0, 200)}`,
             type: "short_term",
           });
+        } catch {
+          // Best-effort
+        }
+
+        // Compact conversation if it has grown too large
+        try {
+          await maybeCompact(convId!, userId);
         } catch {
           // Best-effort
         }

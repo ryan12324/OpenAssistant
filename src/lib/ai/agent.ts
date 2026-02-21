@@ -4,6 +4,7 @@ import { skillRegistry } from "@/lib/skills/registry";
 import { memoryManager } from "@/lib/rag/memory";
 import { integrationRegistry } from "@/lib/integrations";
 import { resolveModelFromSettings } from "@/lib/ai/providers";
+import { audit } from "@/lib/audit";
 import type { SkillContext, SkillResult } from "@/lib/skills/types";
 
 const SYSTEM_PROMPT = `You are OpenAssistant, a personal AI assistant with persistent memory and extensible skills.
@@ -62,7 +63,31 @@ function buildTools(context: SkillContext) {
       description: skill.description,
       parameters: z.object(shape),
       execute: async (args) => {
-        const result = await skill.execute(args as Record<string, unknown>, context);
+        const startMs = Date.now();
+        let result: SkillResult;
+        try {
+          result = await skill.execute(args as Record<string, unknown>, context);
+          audit({
+            userId: context.userId,
+            action: "skill_execute",
+            skillId: skill.id,
+            input: args,
+            output: result.output,
+            durationMs: Date.now() - startMs,
+            success: result.success,
+          });
+        } catch (err) {
+          audit({
+            userId: context.userId,
+            action: "skill_execute",
+            skillId: skill.id,
+            input: args,
+            output: err instanceof Error ? err.message : String(err),
+            durationMs: Date.now() - startMs,
+            success: false,
+          });
+          throw err;
+        }
         return result;
       },
     });
@@ -92,7 +117,32 @@ function buildTools(context: SkillContext) {
         description: `[${instance.definition.name}] ${integrationSkill.description}`,
         parameters: z.object(shape),
         execute: async (args) => {
-          return instance.executeSkill(integrationSkill.id, args as Record<string, unknown>);
+          const startMs = Date.now();
+          try {
+            const result = await instance.executeSkill(integrationSkill.id, args as Record<string, unknown>);
+            audit({
+              userId: context.userId,
+              action: "tool_call",
+              skillId: integrationSkill.id,
+              source: instance.definition.id,
+              input: args,
+              output: result,
+              durationMs: Date.now() - startMs,
+            });
+            return result;
+          } catch (err) {
+            audit({
+              userId: context.userId,
+              action: "tool_call",
+              skillId: integrationSkill.id,
+              source: instance.definition.id,
+              input: args,
+              output: err instanceof Error ? err.message : String(err),
+              durationMs: Date.now() - startMs,
+              success: false,
+            });
+            throw err;
+          }
         },
       });
     }
