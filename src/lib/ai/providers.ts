@@ -166,11 +166,17 @@ export async function resolveModelFromSettings(): Promise<LanguageModelV1> {
   const configProvider = (config.provider || "openai") as AIProvider;
   const modelStr = config.model || "";
 
+  // The DB stores a single "openaiBaseUrl" field that persists across provider
+  // switches. Only use it if it's genuinely custom — i.e. not a known default
+  // for a *different* provider (which would mean it's stale from a previous
+  // provider selection).
+  const baseUrl = sanitizeBaseUrl(config.baseUrl, configProvider);
+
   if (modelStr) {
     log.info("Resolved model from settings", {
       provider: configProvider,
       model: modelStr,
-      baseUrl: config.baseUrl || undefined,
+      baseUrl: baseUrl || "(provider default)",
       apiKey: maskSecret(config.apiKey),
     });
 
@@ -178,7 +184,7 @@ export async function resolveModelFromSettings(): Promise<LanguageModelV1> {
       provider: configProvider,
       model: modelStr,
       apiKey: config.apiKey,
-      baseUrl: config.baseUrl || undefined,
+      baseUrl,
     });
   }
 
@@ -191,8 +197,49 @@ export async function resolveModelFromSettings(): Promise<LanguageModelV1> {
     provider: configProvider,
     model: defaults?.defaultModel || "gpt-4o",
     apiKey: config.apiKey,
-    baseUrl: config.baseUrl || undefined,
+    baseUrl,
   });
+}
+
+/**
+ * Determine whether a stored base URL should be used for the current provider.
+ *
+ * The DB has a single `openaiBaseUrl` column that persists across provider
+ * switches. If the stored URL matches the default for a *different* provider,
+ * it's stale and should be discarded so the correct provider default is used.
+ * If it matches the *current* provider's default, it's also safe to discard
+ * (it's redundant). Only genuinely custom URLs are kept.
+ */
+function sanitizeBaseUrl(raw: string | undefined | null, currentProvider: AIProvider): string | undefined {
+  if (!raw) return undefined;
+
+  // Check if the stored URL matches any provider's default
+  for (const [providerId, defaults] of Object.entries(PROVIDER_DEFAULTS)) {
+    if (raw === defaults.baseUrl) {
+      if (providerId === currentProvider) {
+        // Matches current provider default — redundant, let resolveModel use it naturally
+        log.debug("Base URL matches current provider default, ignoring", {
+          provider: currentProvider,
+          baseUrl: raw,
+        });
+      } else {
+        // Matches a DIFFERENT provider's default — stale from a previous switch
+        log.warn("Discarding stale base URL from previous provider", {
+          storedUrl: raw,
+          matchedProvider: providerId,
+          currentProvider,
+        });
+      }
+      return undefined;
+    }
+  }
+
+  // Genuinely custom URL — keep it
+  log.debug("Using custom base URL override", {
+    provider: currentProvider,
+    baseUrl: raw,
+  });
+  return raw;
 }
 
 /**

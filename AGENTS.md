@@ -159,6 +159,16 @@ try {
 }
 ```
 
+### 6. Do NOT trust the stored `openaiBaseUrl` across provider switches
+
+**Bad:** Assuming the `openaiBaseUrl` DB field is always valid for the current provider.
+
+The DB has a single `openaiBaseUrl` column that persists when the user switches providers. If they previously used OpenAI with `https://api.openai.com/v1` stored, then switch to Vercel, the stale OpenAI URL would override the Vercel gateway URL.
+
+**How it's handled:** `resolveModelFromSettings()` calls `sanitizeBaseUrl()` which checks whether the stored URL matches a known provider default. If it matches a *different* provider's default, it's discarded as stale. Only genuinely custom URLs (e.g., a self-hosted proxy) are kept.
+
+See `src/lib/ai/providers.ts` — `sanitizeBaseUrl()` for the implementation.
+
 ---
 
 ## Key Conventions
