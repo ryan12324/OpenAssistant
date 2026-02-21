@@ -1,5 +1,5 @@
 import { createOpenAI } from "@ai-sdk/openai";
-import type { LanguageModelV1 } from "ai";
+import type { LanguageModel } from "ai";
 import { getEffectiveAIConfig } from "@/lib/settings";
 import { getLogger, maskSecret } from "@/lib/logger";
 
@@ -149,7 +149,7 @@ export function validateModelConfig(config: ModelConfig): {
  * Create a Vercel AI SDK LanguageModel from a ModelConfig.
  * All providers are accessed through OpenAI-compatible endpoints using createOpenAI.
  */
-export function resolveModel(config: ModelConfig): LanguageModelV1 {
+export function resolveModel(config: ModelConfig): LanguageModel {
   const { baseURL, apiKey, modelId } = validateModelConfig(config);
 
   log.info("Resolving AI model", {
@@ -162,7 +162,6 @@ export function resolveModel(config: ModelConfig): LanguageModelV1 {
   const client = createOpenAI({
     baseURL,
     apiKey,
-    compatibility: "compatible",
   });
 
   return client(modelId);
@@ -172,7 +171,7 @@ export function resolveModel(config: ModelConfig): LanguageModelV1 {
  * Resolve a model using DB-stored settings (with env fallback).
  * This is the primary entry point — use this in all server-side code.
  */
-export async function resolveModelFromSettings(): Promise<LanguageModelV1> {
+export async function resolveModelFromSettings(): Promise<LanguageModel> {
   log.debug("Resolving model from settings");
 
   const config = await getEffectiveAIConfig();

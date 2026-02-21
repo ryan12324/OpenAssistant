@@ -57,6 +57,9 @@ rag-server/rag_storage/
 # Uploads (temporary)
 .uploads/
 
+# Prisma generated client
+src/generated/
+
 # IDE
 .idea/
 .vscode/

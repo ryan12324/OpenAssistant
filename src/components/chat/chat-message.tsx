@@ -3,11 +3,11 @@
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { cn } from "@/lib/utils";
-import type { ToolInvocation } from "ai";
+import type { UIToolInvocation, UITool } from "ai";
 
 type MessagePart =
   | { type: "text"; text: string }
-  | { type: "tool-invocation"; toolInvocation: ToolInvocation }
+  | { type: "tool-invocation"; toolInvocation: UIToolInvocation<UITool> }
   | { type: "reasoning"; reasoning: string }
   | { type: "step-start" };
 
@@ -90,16 +90,16 @@ function AssistantParts({ parts }: { parts: unknown[] }) {
   );
 }
 
-function ToolCallCard({ toolInvocation }: { toolInvocation: ToolInvocation }) {
+function ToolCallCard({ toolInvocation }: { toolInvocation: UIToolInvocation<UITool> }) {
   const [open, setOpen] = useState(false);
 
-  const displayName = toolInvocation.toolName
+  const displayName = (toolInvocation.title ?? toolInvocation.toolCallId)
     .replace(/^mcp_[^_]+__/, "")
     .replace(/_/g, " ");
 
   const isRunning =
-    toolInvocation.state === "call" || toolInvocation.state === "partial-call";
-  const isResult = toolInvocation.state === "result";
+    toolInvocation.state === "input-available" || toolInvocation.state === "input-streaming";
+  const isResult = toolInvocation.state === "output-available";
 
   return (
     <div className="rounded-md border border-border bg-background/50 text-xs">
@@ -167,26 +167,26 @@ function ToolCallCard({ toolInvocation }: { toolInvocation: ToolInvocation }) {
       {/* Collapsed content */}
       {open && !isRunning && (
         <div className="border-t border-border px-2.5 py-2 text-muted-foreground">
-          {toolInvocation.args && (
+          {toolInvocation.input != null && (
             <div className="mb-1.5">
               <span className="font-medium text-foreground/60">Input: </span>
               <pre className="mt-0.5 max-h-32 overflow-auto whitespace-pre-wrap break-all rounded bg-muted p-1.5 text-[11px]">
                 {formatJson(
-                  typeof toolInvocation.args === "string"
-                    ? toolInvocation.args
-                    : JSON.stringify(toolInvocation.args)
+                  typeof toolInvocation.input === "string"
+                    ? toolInvocation.input
+                    : JSON.stringify(toolInvocation.input)
                 )}
               </pre>
             </div>
           )}
-          {"result" in toolInvocation && toolInvocation.result != null && (
+          {"output" in toolInvocation && toolInvocation.output != null && (
             <div>
               <span className="font-medium text-foreground/60">Output: </span>
               <pre className="mt-0.5 max-h-48 overflow-auto whitespace-pre-wrap break-all rounded bg-muted p-1.5 text-[11px]">
                 {formatJson(
-                  typeof toolInvocation.result === "string"
-                    ? toolInvocation.result
-                    : JSON.stringify(toolInvocation.result)
+                  typeof toolInvocation.output === "string"
+                    ? toolInvocation.output
+                    : JSON.stringify(toolInvocation.output)
                 )}
               </pre>
             </div>

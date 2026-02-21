@@ -150,7 +150,7 @@ Respond with ONLY a JSON object: {"agent_id": "...", "reason": "..."}`,
           },
           { role: "user", content: message },
         ],
-        maxTokens: 200,
+        maxOutputTokens: 200,
       });
       log.info("AI classification LLM call completed", { durationMs: Date.now() - start });
     } catch (err) {

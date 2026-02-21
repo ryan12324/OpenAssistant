@@ -1,14 +1,33 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { useChat } from "ai/react";
-import type { Message, CreateMessage } from "ai/react";
+import { useChat } from "@ai-sdk/react";
+import type { UIMessage } from "ai";
+import { DefaultChatTransport } from "ai";
 import { ChatInput } from "./chat-input";
 import { ChatMessage } from "./chat-message";
 
 interface ChatViewProps {
   conversationId?: string;
-  initialMessages?: Message[];
+  initialMessages?: UIMessage[];
+}
+
+/** Extract the first text content from a UIMessage's parts. */
+function getTextContent(msg: UIMessage): string {
+  for (const part of msg.parts) {
+    if (part.type === "text") return part.text;
+  }
+  return "";
+}
+
+/** Create a parts array from a text string. */
+function textParts(text: string): UIMessage["parts"] {
+  return [{ type: "text" as const, text }];
+}
+
+/** Update the text content of a message by replacing its parts. */
+function withText(msg: UIMessage, text: string): UIMessage {
+  return { ...msg, parts: textParts(text) };
 }
 
 // Parse /team and /swarm commands from user input
@@ -66,22 +85,25 @@ export function ChatView({ conversationId, initialMessages }: ChatViewProps) {
   const {
     messages,
     setMessages,
-    append,
+    sendMessage,
     status,
     error,
   } = useChat({
-    api: "/api/chat",
-    initialMessages: initialMessages || [],
-    body: { conversationId: currentConvId },
-    maxSteps: 10,
-    onResponse(response) {
-      const convId = response.headers.get("X-Conversation-Id");
-      if (convId && !currentConvId) {
-        setCurrentConvId(convId);
-        window.history.replaceState(null, "", `/chat/${convId}`);
-        window.dispatchEvent(new CustomEvent("conversationCreated"));
-      }
-    },
+    transport: new DefaultChatTransport({
+      api: "/api/chat",
+      body: { conversationId: currentConvId },
+      fetch: async (url, init) => {
+        const response = await globalThis.fetch(url as string, init as RequestInit);
+        const convId = response.headers.get("X-Conversation-Id");
+        if (convId && !currentConvId) {
+          setCurrentConvId(convId);
+          window.history.replaceState(null, "", `/chat/${convId}`);
+          window.dispatchEvent(new CustomEvent("conversationCreated"));
+        }
+        return response;
+      },
+    }),
+    messages: initialMessages || [],
   });
 
   const isLoading = status !== "ready" || agentLoading;
@@ -109,10 +131,7 @@ export function ChatView({ conversationId, initialMessages }: ChatViewProps) {
     setMessages((prev) =>
       prev.map((m) =>
         m.id === assistantId
-          ? {
-              ...m,
-              content: `Running ${command.type} **${command.id}**...\n\nTask: ${command.task}`,
-            }
+          ? withText(m, `Running ${command.type} **${command.id}**...\n\nTask: ${command.task}`)
           : m
       )
     );
@@ -176,14 +195,11 @@ export function ChatView({ conversationId, initialMessages }: ChatViewProps) {
                   setMessages((prev) =>
                     prev.map((m) =>
                       m.id === assistantId
-                        ? {
-                            ...m,
-                            content: `**Team: ${command.id}** | Task: ${command.task}\n\n${progress}${
-                              finalOutput
-                                ? `\n\n---\n\n**Result** (${(durationMs / 1000).toFixed(1)}s):\n\n${finalOutput}`
-                                : "\n\n*Running...*"
-                            }`,
-                          }
+                        ? withText(m, `**Team: ${command.id}** | Task: ${command.task}\n\n${progress}${
+                            finalOutput
+                              ? `\n\n---\n\n**Result** (${(durationMs / 1000).toFixed(1)}s):\n\n${finalOutput}`
+                              : "\n\n*Running...*"
+                          }`)
                         : m
                     )
                   );
@@ -199,10 +215,7 @@ export function ChatView({ conversationId, initialMessages }: ChatViewProps) {
           setMessages((prev) =>
             prev.map((m) =>
               m.id === assistantId
-                ? {
-                    ...m,
-                    content: `**Team: ${command.id}** completed but produced no output.\n\n${events.join("\n\n")}`,
-                  }
+                ? withText(m, `**Team: ${command.id}** completed but produced no output.\n\n${events.join("\n\n")}`)
                 : m
             )
           );
@@ -235,10 +248,7 @@ export function ChatView({ conversationId, initialMessages }: ChatViewProps) {
       setMessages((prev) =>
         prev.map((m) =>
           m.id === assistantId
-            ? {
-                ...m,
-                content: `**${command.type === "team" ? "Team" : "Swarm"}: ${command.id}**\n\n${formatted}`,
-              }
+            ? withText(m, `**${command.type === "team" ? "Team" : "Swarm"}: ${command.id}**\n\n${formatted}`)
             : m
         )
       );
@@ -249,10 +259,7 @@ export function ChatView({ conversationId, initialMessages }: ChatViewProps) {
       setMessages((prev) =>
         prev.map((m) =>
           m.id === assistantId
-            ? {
-                ...m,
-                content: `Failed to run ${command.type} **${command.id}**: ${errMsg}\n\nAvailable commands:\n- \`/team <team-id> <task>\`\n- \`/swarm <swarm-id> <task>\`\n\nUse the Teams page to see available team and swarm IDs.`,
-              }
+            ? withText(m, `Failed to run ${command.type} **${command.id}**: ${errMsg}\n\nAvailable commands:\n- \`/team <team-id> <task>\`\n- \`/swarm <swarm-id> <task>\`\n\nUse the Teams page to see available team and swarm IDs.`)
             : m
         )
       );
@@ -264,18 +271,16 @@ export function ChatView({ conversationId, initialMessages }: ChatViewProps) {
     const command = parseCommand(content);
     if (command.type !== "none" && command.id && command.task) {
       // Handle team/swarm commands manually (outside useChat)
-      const userMsg: Message = {
+      const userMsg: UIMessage = {
         id: crypto.randomUUID(),
         role: "user",
-        content,
-        parts: [{ type: "text" as const, text: content }],
+        parts: textParts(content),
       };
       const assistantId = crypto.randomUUID();
-      const assistantMsg: Message = {
+      const assistantMsg: UIMessage = {
         id: assistantId,
         role: "assistant",
-        content: "",
-        parts: [{ type: "text" as const, text: "" }],
+        parts: textParts(""),
       };
       setMessages([...messages, userMsg, assistantMsg]);
       setAgentLoading(true);
@@ -305,21 +310,19 @@ export function ChatView({ conversationId, initialMessages }: ChatViewProps) {
         {
           id: crypto.randomUUID(),
           role: "user" as const,
-          content,
-          parts: [{ type: "text" as const, text: content }],
+          parts: textParts(content),
         },
         {
           id: crypto.randomUUID(),
           role: "assistant" as const,
-          content: helpContent,
-          parts: [{ type: "text" as const, text: helpContent }],
+          parts: textParts(helpContent),
         },
       ]);
       return;
     }
 
-    // Normal message — use the useChat append which handles streaming automatically
-    await append({ role: "user", content } as CreateMessage);
+    // Normal message — use the useChat sendMessage which handles streaming automatically
+    await sendMessage({ text: content });
   }
 
   // Check if the last assistant message is still loading (submitted but no content yet)
@@ -327,7 +330,7 @@ export function ChatView({ conversationId, initialMessages }: ChatViewProps) {
   const showLoading =
     (status === "submitted" || agentLoading) &&
     lastMsg?.role === "assistant" &&
-    !lastMsg.content &&
+    !getTextContent(lastMsg) &&
     (!lastMsg.parts || lastMsg.parts.length === 0);
 
   return (
@@ -370,7 +373,7 @@ export function ChatView({ conversationId, initialMessages }: ChatViewProps) {
               <ChatMessage
                 key={msg.id}
                 role={msg.role as "user" | "assistant" | "system"}
-                content={msg.content}
+                content={getTextContent(msg)}
                 parts={msg.parts}
               />
             ))}
