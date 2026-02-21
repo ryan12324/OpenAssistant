@@ -54,6 +54,11 @@ vi.mock("@/lib/integrations", () => ({
   },
 }));
 
+vi.mock("@/lib/schema-builder", async () => {
+  const actual = await vi.importActual("@/lib/schema-builder");
+  return actual;
+});
+
 vi.mock("@/lib/logger", () => ({
   default: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() },
 }));

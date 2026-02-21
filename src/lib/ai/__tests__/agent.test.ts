@@ -35,6 +35,11 @@ const mockMcpManager = vi.hoisted(() => ({
 
 const mockGetToolApprovalRequirement = vi.hoisted(() => vi.fn());
 
+vi.mock("@/lib/schema-builder", async () => {
+  const actual = await vi.importActual("@/lib/schema-builder");
+  return actual;
+});
+
 vi.mock("@/lib/logger", () => ({
   getLogger: () => mockLog,
 }));

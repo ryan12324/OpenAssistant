@@ -3,6 +3,7 @@ import { z } from "zod";
 import { skillRegistry } from "@/lib/skills/registry";
 import { integrationRegistry } from "@/lib/integrations";
 import { resolveModelFromSettings } from "@/lib/ai/providers";
+import { buildZodSchemaFromParams } from "@/lib/schema-builder";
 import type { AgentPersona, AgentMessage, AgentEvent } from "./types";
 import type { SkillContext } from "@/lib/skills/types";
 
@@ -178,16 +179,7 @@ export class AgentNode {
         continue;
       }
 
-      const shape: Record<string, z.ZodTypeAny> = {};
-      for (const param of skill.parameters) {
-        let schema: z.ZodTypeAny;
-        switch (param.type) {
-          case "number": schema = z.number().describe(param.description); break;
-          case "boolean": schema = z.boolean().describe(param.description); break;
-          default: schema = z.string().describe(param.description);
-        }
-        shape[param.name] = param.required ? schema : schema.optional();
-      }
+      const shape = buildZodSchemaFromParams(skill.parameters);
 
       tools[skill.id] = tool({
         description: skill.description,
@@ -207,16 +199,7 @@ export class AgentNode {
       }
 
       for (const integrationSkill of instance.definition.skills) {
-        const shape: Record<string, z.ZodTypeAny> = {};
-        for (const param of integrationSkill.parameters) {
-          let schema: z.ZodTypeAny;
-          switch (param.type) {
-            case "number": schema = z.number().describe(param.description); break;
-            case "boolean": schema = z.boolean().describe(param.description); break;
-            default: schema = z.string().describe(param.description);
-          }
-          shape[param.name] = param.required ? schema : schema.optional();
-        }
+        const shape = buildZodSchemaFromParams(integrationSkill.parameters);
 
         tools[integrationSkill.id] = tool({
           description: `[${instance.definition.name}] ${integrationSkill.description}`,
