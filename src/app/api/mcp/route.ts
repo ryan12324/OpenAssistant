@@ -4,6 +4,9 @@ import { prisma } from "@/lib/prisma";
 import { mcpManager } from "@/lib/mcp/client";
 import { loadGlobalMcpServers } from "@/lib/mcp/global-config";
 import { getToolPermissionLabel } from "@/lib/mcp/permissions";
+import { getLogger } from "@/lib/logger";
+
+const log = getLogger("api.mcp");
 
 /**
  * GET /api/mcp — List all MCP servers for the current user.
@@ -12,6 +15,7 @@ import { getToolPermissionLabel } from "@/lib/mcp/permissions";
  */
 export async function GET() {
   try {
+    log.info("Listing MCP servers");
     const session = await requireSession();
     const userId = session.user.id;
 
@@ -74,12 +78,19 @@ export async function GET() {
       };
     });
 
+    log.info("MCP servers listed", {
+      userServerCount: userServers.length,
+      globalServerCount: globalServers.length,
+      totalServerCount: userServers.length + globalServers.length,
+    });
+
     return Response.json({ servers: [...userServers, ...globalServers] });
   } catch (error) {
     if (error instanceof Error && error.message === "Unauthorized") {
+      log.warn("Unauthorized access to MCP list");
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
-    console.error("MCP list error:", error);
+    log.error("MCP list error", { error });
     return Response.json({ error: "Internal server error" }, { status: 500 });
   }
 }
@@ -96,7 +107,10 @@ export async function POST(req: NextRequest) {
 
     const { name, transport, command, args, env, url, headers, enabled } = body;
 
+    log.info("Creating/updating MCP server", { name, transport });
+
     if (!name || !transport) {
+      log.warn("MCP create validation failed: missing name or transport", { name, transport });
       return Response.json(
         { error: "name and transport are required" },
         { status: 400 }
@@ -104,6 +118,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (transport === "stdio" && !command) {
+      log.warn("MCP create validation failed: missing command for stdio transport", { name });
       return Response.json(
         { error: "command is required for stdio transport" },
         { status: 400 }
@@ -111,6 +126,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (transport === "http" && !url) {
+      log.warn("MCP create validation failed: missing url for http transport", { name });
       return Response.json(
         { error: "url is required for http transport" },
         { status: 400 }
@@ -118,6 +134,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Upsert the server config
+    log.debug("Upserting MCP server config", { userId, name, transport });
     const row = await prisma.mcpServer.upsert({
       where: { userId_name: { userId, name } },
       create: {
@@ -151,6 +168,14 @@ export async function POST(req: NextRequest) {
     const states = mcpManager.getServersForUser(userId);
     const live = states.find((s) => s.config.id === liveId);
 
+    const toolCount = (live?.tools ?? []).length;
+    log.info("MCP server created/updated successfully", {
+      serverId: row.id,
+      name: row.name,
+      status: live?.status ?? "disconnected",
+      toolCount,
+    });
+
     return Response.json({
       id: row.id,
       name: row.name,
@@ -163,9 +188,10 @@ export async function POST(req: NextRequest) {
     });
   } catch (error) {
     if (error instanceof Error && error.message === "Unauthorized") {
+      log.warn("Unauthorized access to MCP create");
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
-    console.error("MCP create error:", error);
+    log.error("MCP create error", { error });
     return Response.json({ error: "Internal server error" }, { status: 500 });
   }
 }
@@ -180,7 +206,10 @@ export async function DELETE(req: NextRequest) {
     const userId = session.user.id;
     const body = await req.json();
 
+    log.info("Deleting MCP server", { serverId: body.id });
+
     if (!body.id) {
+      log.warn("MCP delete validation failed: missing id");
       return Response.json({ error: "id is required" }, { status: 400 });
     }
 
@@ -190,6 +219,7 @@ export async function DELETE(req: NextRequest) {
     });
 
     if (!row) {
+      log.warn("MCP server not found for deletion", { serverId: body.id, userId });
       return Response.json({ error: "Server not found" }, { status: 404 });
     }
 
@@ -197,12 +227,15 @@ export async function DELETE(req: NextRequest) {
     await mcpManager.invalidateUser(userId);
     await prisma.mcpServer.delete({ where: { id: body.id } });
 
+    log.info("MCP server deleted successfully", { serverId: body.id, name: row.name });
+
     return Response.json({ deleted: true });
   } catch (error) {
     if (error instanceof Error && error.message === "Unauthorized") {
+      log.warn("Unauthorized access to MCP delete");
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
-    console.error("MCP delete error:", error);
+    log.error("MCP delete error", { error });
     return Response.json({ error: "Internal server error" }, { status: 500 });
   }
 }

@@ -2,6 +2,9 @@ import { NextRequest } from "next/server";
 import { requireSession } from "@/lib/auth-server";
 import { TeamOrchestrator, presetTeams } from "@/lib/agents";
 import type { TeamDefinition } from "@/lib/agents";
+import { getLogger } from "@/lib/logger";
+
+const log = getLogger("api.agents.teams.stream");
 
 /** POST /api/agents/teams/stream — Run a team with SSE streaming */
 export async function POST(req: NextRequest) {
@@ -16,16 +19,25 @@ export async function POST(req: NextRequest) {
       customTeam?: TeamDefinition;
     };
 
+    log.info("Starting team stream", {
+      teamId: teamId || "custom",
+      taskLength: task?.length ?? 0,
+    });
+
     if (!task) {
+      log.warn("Missing required task field");
       return Response.json({ error: "Task is required" }, { status: 400 });
     }
 
     const definition = customTeam || presetTeams.find((t) => t.id === teamId);
     if (!definition) {
+      log.warn("Team not found", { teamId });
       return Response.json({ error: "Team not found" }, { status: 404 });
     }
 
     const orchestrator = new TeamOrchestrator(definition);
+
+    log.info("Starting SSE stream", { teamId: definition.id });
 
     const stream = new ReadableStream({
       async start(controller) {
@@ -45,6 +57,10 @@ export async function POST(req: NextRequest) {
             );
           }
         } catch (error) {
+          log.error("Stream error", {
+            teamId: definition.id,
+            error: error instanceof Error ? error.message : "Unknown error",
+          });
           controller.enqueue(
             encoder.encode(
               `data: ${JSON.stringify({

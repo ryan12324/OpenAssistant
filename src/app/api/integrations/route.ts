@@ -2,6 +2,9 @@ import { NextRequest } from "next/server";
 import { requireSession } from "@/lib/auth-server";
 import { integrationRegistry } from "@/lib/integrations";
 import { prisma } from "@/lib/prisma";
+import { getLogger } from "@/lib/logger";
+
+const log = getLogger("api.integrations");
 
 /**
  * GET /api/integrations
@@ -9,6 +12,8 @@ import { prisma } from "@/lib/prisma";
  */
 export async function GET() {
   try {
+    log.info("Listing integrations for current user");
+
     const session = await requireSession();
 
     const definitions = integrationRegistry.getAllDefinitions();
@@ -38,11 +43,19 @@ export async function GET() {
       };
     });
 
+    const enabledCount = integrations.filter((i) => i.enabled).length;
+    log.info("Integrations listed successfully", {
+      total: integrations.length,
+      enabled: enabledCount,
+    });
+
     return Response.json({ integrations });
   } catch (error) {
     if (error instanceof Error && error.message === "Unauthorized") {
+      log.warn("Unauthorized access attempt to GET /api/integrations");
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
+    log.error("Failed to list integrations", { error });
     return Response.json({ error: "Internal server error" }, { status: 500 });
   }
 }
@@ -62,9 +75,12 @@ export async function POST(req: NextRequest) {
       config?: Record<string, unknown>;
     };
 
+    log.info("Configuring integration", { integrationId, enabled });
+
     // Verify integration exists
     const def = integrationRegistry.getDefinition(integrationId);
     if (!def) {
+      log.warn("Integration not found", { integrationId });
       return Response.json({ error: "Integration not found" }, { status: 404 });
     }
 
@@ -88,8 +104,12 @@ export async function POST(req: NextRequest) {
       },
     });
 
+    log.debug("Upserted skill config", { integrationId, userId: session.user.id });
+
     // Invalidate hydration cache so integration changes take effect immediately
     integrationRegistry.invalidateUser(session.user.id);
+
+    log.debug("Invalidated hydration cache", { userId: session.user.id });
 
     // If enabling, try to connect
     if (enabled && config) {
@@ -100,8 +120,13 @@ export async function POST(req: NextRequest) {
           config as Record<string, string>
         );
         await instance.connect();
+        log.info("Integration connected successfully", { integrationId });
         return Response.json({ status: "connected", integrationId });
       } catch (error) {
+        log.error("Integration connection failed", {
+          integrationId,
+          error: error instanceof Error ? error.message : "Connection failed",
+        });
         return Response.json({
           status: "error",
           integrationId,
@@ -110,11 +135,14 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    log.info("Integration saved", { integrationId, enabled });
     return Response.json({ status: "ok", integrationId, enabled });
   } catch (error) {
     if (error instanceof Error && error.message === "Unauthorized") {
+      log.warn("Unauthorized access attempt to POST /api/integrations");
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
+    log.error("Failed to configure integration", { error });
     return Response.json({ error: "Internal server error" }, { status: 500 });
   }
 }

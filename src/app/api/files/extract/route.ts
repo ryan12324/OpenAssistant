@@ -4,6 +4,9 @@ import { join } from "path";
 import { randomUUID } from "crypto";
 import { requireSession } from "@/lib/auth-server";
 import { extractFromFile, SUPPORTED_EXTENSIONS } from "@/lib/rag/extractor";
+import { getLogger } from "@/lib/logger";
+
+const log = getLogger("api.files.extract");
 
 const UPLOAD_DIR = join(process.cwd(), ".uploads");
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
@@ -22,10 +25,18 @@ export async function POST(req: NextRequest) {
     const enableOcr = formData.get("enableOcr") !== "false";
 
     if (!file) {
+      log.warn("File extract validation failed: no file provided");
       return Response.json({ error: "No file provided" }, { status: 400 });
     }
 
+    log.info("File extraction started", { fileName: file.name, fileSize: file.size });
+
     if (file.size > MAX_FILE_SIZE) {
+      log.warn("File extract validation failed: file too large", {
+        fileName: file.name,
+        fileSize: file.size,
+        maxSize: MAX_FILE_SIZE,
+      });
       return Response.json(
         { error: `File too large. Maximum size is ${MAX_FILE_SIZE / 1024 / 1024}MB` },
         { status: 400 }
@@ -34,6 +45,10 @@ export async function POST(req: NextRequest) {
 
     const ext = "." + (file.name.split(".").pop()?.toLowerCase() || "");
     if (!SUPPORTED_EXTENSIONS.includes(ext)) {
+      log.warn("File extract validation failed: unsupported file type", {
+        fileName: file.name,
+        extension: ext,
+      });
       return Response.json(
         { error: `Unsupported file type: ${ext}` },
         { status: 400 }
@@ -45,6 +60,7 @@ export async function POST(req: NextRequest) {
     const fileId = randomUUID();
     const filePath = join(UPLOAD_DIR, `${fileId}${ext}`);
     const bytes = new Uint8Array(await file.arrayBuffer());
+    log.debug("Writing file to disk for extraction", { filePath, fileId, fileSize: bytes.length });
     await writeFile(filePath, bytes);
 
     try {
@@ -53,6 +69,17 @@ export async function POST(req: NextRequest) {
         extractTables: true,
         extractKeywords: true,
         enableQualityProcessing: true,
+      });
+
+      log.info("File extraction completed successfully", {
+        fileName: file.name,
+        mimeType: extracted.mimeType,
+        contentLength: extracted.content.length,
+        tableCount: extracted.tables.length,
+        imageCount: extracted.imageCount,
+        keywordCount: extracted.keywords.length,
+        elementCount: extracted.elements.length,
+        qualityScore: extracted.qualityScore,
       });
 
       return Response.json({
@@ -73,9 +100,10 @@ export async function POST(req: NextRequest) {
     }
   } catch (error) {
     if (error instanceof Error && error.message === "Unauthorized") {
+      log.warn("Unauthorized access to file extraction");
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
-    console.error("File extraction error:", error);
+    log.error("File extraction error", { error });
     return Response.json(
       { error: error instanceof Error ? error.message : "Failed to extract file" },
       { status: 500 }

@@ -8,6 +8,9 @@ import {
 } from "@/lib/integrations/chat/file-handler";
 import { enqueue, type InboundMessagePayload } from "@/lib/queue";
 import { audit } from "@/lib/audit";
+import { getLogger } from "@/lib/logger";
+
+const log = getLogger("api.webhook");
 
 /**
  * POST /api/integrations/webhook
@@ -34,6 +37,8 @@ import { audit } from "@/lib/audit";
  * }
  */
 export async function POST(req: NextRequest) {
+  const startTime = Date.now();
+
   try {
     const body = await req.json();
     const sync = req.nextUrl.searchParams.get("sync") === "true";
@@ -58,7 +63,15 @@ export async function POST(req: NextRequest) {
       metadata?: Record<string, unknown>;
     };
 
+    log.info("Inbound webhook received", {
+      source,
+      senderId,
+      sync,
+      contentLength: content?.length ?? 0,
+    });
+
     if (!source || !secret) {
+      log.warn("Missing required fields", { source: !!source, secret: !!secret });
       return Response.json(
         { error: "Missing required fields: source, secret" },
         { status: 400 }
@@ -68,6 +81,7 @@ export async function POST(req: NextRequest) {
     // Verify the integration exists
     const definition = integrationRegistry.getDefinition(source);
     if (!definition) {
+      log.warn("Unknown integration source", { source });
       return Response.json(
         { error: `Unknown integration: ${source}` },
         { status: 404 }
@@ -80,6 +94,7 @@ export async function POST(req: NextRequest) {
     });
 
     if (!config) {
+      log.warn("Integration not configured or not enabled", { source });
       return Response.json(
         { error: `Integration "${source}" is not configured or enabled` },
         { status: 403 }
@@ -93,10 +108,13 @@ export async function POST(req: NextRequest) {
       storedConfig.appPassword;
 
     if (!webhookSecret || webhookSecret !== secret) {
+      log.warn("Invalid webhook secret", { source, senderId });
       return Response.json({ error: "Invalid webhook secret" }, { status: 403 });
     }
 
     const userId = config.userId;
+
+    log.debug("Webhook authentication successful", { source, userId });
 
     // Audit the inbound event
     audit({
@@ -109,12 +127,20 @@ export async function POST(req: NextRequest) {
     // ── Process file attachments synchronously (lightweight) ───
     let fileResults;
     if (attachments && attachments.length > 0) {
+      log.info("Processing inbound attachments", {
+        source,
+        attachmentCount: attachments.length,
+      });
       const platformHeaders = getPlatformHeaders(source, storedConfig);
       fileResults = await processInboundAttachments({
         attachments,
         headers: platformHeaders,
         userId,
         source: definition.name,
+      });
+      log.info("Attachment processing complete", {
+        total: attachments.length,
+        succeeded: fileResults.filter((r) => r.success).length,
       });
     }
 
@@ -138,12 +164,26 @@ export async function POST(req: NextRequest) {
 
       if (sync) {
         // Synchronous path: process in-band for callers that need the reply
+        const syncStart = Date.now();
         const { processInboundMessage } = await import("@/lib/worker");
         const result = await processInboundMessage(payload);
         aiReply = result?.reply;
+        log.info("Synchronous processing complete", {
+          source,
+          senderId,
+          durationMs: Date.now() - syncStart,
+          hasReply: !!aiReply,
+        });
       } else {
         // Async path: enqueue and return immediately (Gateway Pattern)
+        const enqueueStart = Date.now();
         jobId = await enqueue("inbound_message", payload, userId);
+        log.info("Message enqueued for async processing", {
+          source,
+          senderId,
+          jobId,
+          durationMs: Date.now() - enqueueStart,
+        });
       }
     }
 
@@ -167,9 +207,23 @@ export async function POST(req: NextRequest) {
       response.fileSummary = formatFileResults(fileResults);
     }
 
+    log.info("Webhook response sent", {
+      source,
+      senderId,
+      success: true,
+      totalDurationMs: Date.now() - startTime,
+      filesProcessed: response.filesProcessed,
+      hasReply: !!response.reply,
+      jobId: response.jobId,
+    });
+
     return Response.json(response);
   } catch (error) {
-    console.error("Webhook error:", error);
+    log.error("Webhook processing failed", {
+      error: error instanceof Error ? error.message : "Unknown error",
+      stack: error instanceof Error ? error.stack : undefined,
+      durationMs: Date.now() - startTime,
+    });
     return Response.json(
       { error: error instanceof Error ? error.message : "Webhook processing failed" },
       { status: 500 }

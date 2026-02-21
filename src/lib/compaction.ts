@@ -2,6 +2,9 @@ import { prisma } from "@/lib/prisma";
 import { generateText } from "ai";
 import { resolveModelFromSettings } from "@/lib/ai/providers";
 import { memoryManager } from "@/lib/rag/memory";
+import { getLogger } from "@/lib/logger";
+
+const log = getLogger("compaction");
 
 /**
  * Context & Memory — Conversation compaction.
@@ -23,7 +26,20 @@ const KEEP_RECENT = 20; // messages to keep verbatim (most recent)
  */
 export async function maybeCompact(conversationId: string, userId: string) {
   const count = await prisma.message.count({ where: { conversationId } });
+
+  log.debug("checked compaction eligibility", {
+    conversationId,
+    messageCount: count,
+    threshold: COMPACTION_THRESHOLD,
+  });
+
   if (count <= COMPACTION_THRESHOLD) return;
+
+  log.info("compaction threshold exceeded, triggering compaction", {
+    conversationId,
+    messageCount: count,
+    threshold: COMPACTION_THRESHOLD,
+  });
 
   await compactConversation(conversationId, userId);
 }
@@ -35,15 +51,29 @@ export async function compactConversation(
   conversationId: string,
   userId: string
 ) {
+  log.info("starting conversation compaction", { conversationId, userId });
+
   // Fetch all messages oldest-first
   const allMessages = await prisma.message.findMany({
     where: { conversationId },
     orderBy: { createdAt: "asc" },
   });
 
+  log.debug("fetched messages for compaction", {
+    conversationId,
+    totalMessages: allMessages.length,
+    keepRecent: KEEP_RECENT,
+  });
+
   if (allMessages.length <= KEEP_RECENT) return;
 
   const toSummarize = allMessages.slice(0, allMessages.length - KEEP_RECENT);
+
+  log.info("summarizing messages", {
+    conversationId,
+    messagesToSummarize: toSummarize.length,
+    messagesToKeep: allMessages.length - toSummarize.length,
+  });
 
   // Build a transcript for the LLM
   const transcript = toSummarize
@@ -54,6 +84,13 @@ export async function compactConversation(
     .join("\n");
 
   const model = await resolveModelFromSettings();
+
+  log.debug("resolved model for summarization", {
+    conversationId,
+    model: String(model),
+  });
+
+  const startTime = Date.now();
 
   const { text: summary } = await generateText({
     model,
@@ -70,6 +107,14 @@ export async function compactConversation(
     ],
   });
 
+  const durationMs = Date.now() - startTime;
+
+  log.info("summary generated", {
+    conversationId,
+    durationMs,
+    summaryLength: summary.length,
+  });
+
   // Store the summary as a system message at the start of the conversation
   // Check if there's already a compaction summary and update it
   const existingSummary = await prisma.message.findFirst({
@@ -81,6 +126,11 @@ export async function compactConversation(
   });
 
   if (existingSummary) {
+    log.debug("updating existing summary message", {
+      conversationId,
+      summaryMessageId: existingSummary.id,
+    });
+
     await prisma.message.update({
       where: { id: existingSummary.id },
       data: {
@@ -88,6 +138,8 @@ export async function compactConversation(
       },
     });
   } else {
+    log.debug("creating new summary message", { conversationId });
+
     await prisma.message.create({
       data: {
         conversationId,
@@ -100,6 +152,12 @@ export async function compactConversation(
 
   // Persist summary as long-term memory for RAG recall
   try {
+    log.debug("storing compaction summary in RAG memory", {
+      conversationId,
+      userId,
+      summarizedCount: toSummarize.length,
+    });
+
     await memoryManager.store({
       userId,
       content: summary,
@@ -107,8 +165,12 @@ export async function compactConversation(
       tags: ["compaction", "conversation_summary"],
       summary: `Compacted ${toSummarize.length} messages from conversation.`,
     });
-  } catch {
-    // Best-effort
+  } catch (err) {
+    log.warn("failed to store compaction summary in RAG memory", {
+      conversationId,
+      userId,
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 
   // Delete the old messages
@@ -117,7 +179,10 @@ export async function compactConversation(
     where: { id: { in: idsToDelete } },
   });
 
-  console.log(
-    `[compaction] Compacted ${idsToDelete.length} messages in conversation ${conversationId}`
-  );
+  log.info("conversation compaction complete", {
+    conversationId,
+    deletedMessages: idsToDelete.length,
+    keptMessages: allMessages.length - idsToDelete.length,
+    summaryLength: summary.length,
+  });
 }

@@ -5,6 +5,9 @@ import type {
   IntegrationStatus,
 } from "./types";
 import { prisma } from "@/lib/prisma";
+import { getLogger } from "@/lib/logger";
+
+const log = getLogger("integrations");
 
 // Import all integration definitions
 import { telegramIntegration, TelegramInstance } from "./chat/telegram";
@@ -87,6 +90,7 @@ class IntegrationRegistry {
   private hydratedUsers: Set<string> = new Set();
 
   register(definition: IntegrationDefinition, instanceClass: InstanceConstructor): void {
+    log.debug("Registering integration definition", { integrationId: definition.id });
     this.integrations.set(definition.id, { definition, instanceClass });
   }
 
@@ -106,6 +110,7 @@ class IntegrationRegistry {
    * Create and connect an integration instance.
    */
   async createInstance(id: string, config: IntegrationConfig): Promise<IntegrationInstance> {
+    log.info("Creating integration instance", { integrationId: id });
     const entry = this.integrations.get(id);
     if (!entry) throw new Error(`Integration "${id}" not found`);
 
@@ -122,6 +127,7 @@ class IntegrationRegistry {
     integrationId: string,
     config: IntegrationConfig
   ): Promise<IntegrationInstance> {
+    log.info("Creating user integration instance", { userId, integrationId });
     const entry = this.integrations.get(integrationId);
     if (!entry) throw new Error(`Integration "${integrationId}" not found`);
 
@@ -164,6 +170,7 @@ class IntegrationRegistry {
       }
     }
 
+    log.debug("Retrieved active instances for user", { userId, count: result.length });
     return result;
   }
 
@@ -175,10 +182,14 @@ class IntegrationRegistry {
   async hydrateUserIntegrations(userId: string): Promise<void> {
     if (this.hydratedUsers.has(userId)) return;
 
+    log.info("Hydrating user integrations", { userId });
+
     try {
       const configs = await prisma.skillConfig.findMany({
         where: { userId, enabled: true },
       });
+
+      let hydratedCount = 0;
 
       for (const cfg of configs) {
         // Only hydrate integrations that have a registered definition
@@ -194,17 +205,21 @@ class IntegrationRegistry {
           const config = JSON.parse(cfg.config) as IntegrationConfig;
           const instance = await this.createUserInstance(userId, cfg.skillId, config);
           await instance.connect();
+          log.debug("Hydrated integration", { userId, integrationId: cfg.skillId });
+          hydratedCount++;
         } catch (error) {
-          console.error(
-            `Failed to hydrate integration "${cfg.skillId}" for user ${userId}:`,
-            error
-          );
+          log.warn(`Failed to hydrate integration "${cfg.skillId}"`, {
+            userId,
+            integrationId: cfg.skillId,
+            error: error instanceof Error ? error.message : String(error),
+          });
         }
       }
 
       this.hydratedUsers.add(userId);
+      log.info("User integrations hydration complete", { userId, count: hydratedCount });
     } catch (error) {
-      console.error(`Failed to hydrate integrations for user ${userId}:`, error);
+      log.error("Failed to hydrate integrations", { userId, error: error instanceof Error ? error.message : String(error) });
     }
   }
 
@@ -213,6 +228,7 @@ class IntegrationRegistry {
    * Call this when a user changes their integration config.
    */
   invalidateUser(userId: string): void {
+    log.info("Invalidating user integration cache", { userId });
     this.hydratedUsers.delete(userId);
     // Remove existing user instances so they're recreated
     for (const key of this.userInstances.keys()) {
@@ -227,11 +243,18 @@ class IntegrationRegistry {
   }
 
   async disconnectAll(): Promise<void> {
+    log.info("Disconnecting all integration instances", {
+      globalCount: this.instances.size,
+      userCount: this.userInstances.size,
+    });
+
     for (const instance of this.instances.values()) {
       try {
         await instance.disconnect();
       } catch (e) {
-        console.error(`Failed to disconnect ${instance.definition.id}:`, e);
+        log.error(`Failed to disconnect ${instance.definition.id}`, {
+          error: e instanceof Error ? e.message : String(e),
+        });
       }
     }
     this.instances.clear();
@@ -240,7 +263,9 @@ class IntegrationRegistry {
       try {
         await instance.disconnect();
       } catch (e) {
-        console.error(`Failed to disconnect ${instance.definition.id}:`, e);
+        log.error(`Failed to disconnect ${instance.definition.id}`, {
+          error: e instanceof Error ? e.message : String(e),
+        });
       }
     }
     this.userInstances.clear();

@@ -1,4 +1,7 @@
 import { prisma } from "@/lib/prisma";
+import { getLogger } from "@/lib/logger";
+
+const log = getLogger("audit");
 
 /**
  * Harness & Permissions — Audit logging for every tool/skill execution.
@@ -39,6 +42,15 @@ function truncate(val: unknown, max: number): string | null {
 
 /** Write an audit log entry (non-blocking, best-effort). */
 export function audit(entry: AuditEntry): void {
+  log.debug("Writing audit entry", {
+    action: entry.action,
+    userId: entry.userId,
+    skillId: entry.skillId,
+    source: entry.source,
+    durationMs: entry.durationMs,
+    success: entry.success ?? true,
+  });
+
   prisma.auditLog
     .create({
       data: {
@@ -53,7 +65,7 @@ export function audit(entry: AuditEntry): void {
       },
     })
     .catch((err) => {
-      console.error("[audit] Failed to write log:", err);
+      log.error("Failed to write audit log", { error: err instanceof Error ? err.message : String(err) });
     });
 }
 
@@ -64,7 +76,8 @@ export async function getAuditLogs(params: {
   limit?: number;
   offset?: number;
 }) {
-  return prisma.auditLog.findMany({
+  log.debug("Querying audit logs", { userId: params.userId, action: params.action, limit: params.limit });
+  const results = await prisma.auditLog.findMany({
     where: {
       userId: params.userId,
       ...(params.action ? { action: params.action } : {}),
@@ -73,4 +86,6 @@ export async function getAuditLogs(params: {
     take: params.limit ?? 50,
     skip: params.offset ?? 0,
   });
+  log.debug("Audit logs query complete", { count: results.length });
+  return results;
 }

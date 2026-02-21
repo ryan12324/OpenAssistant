@@ -3,6 +3,9 @@ import { memorySkills } from "./builtin/memory-skills";
 import { webSkills } from "./builtin/web-skills";
 import { productivitySkills } from "./builtin/productivity-skills";
 import { agentSkills } from "./builtin/agent-skills";
+import { getLogger } from "@/lib/logger";
+
+const log = getLogger("skills");
 
 class SkillRegistry {
   private skills: Map<string, SkillDefinition> = new Map();
@@ -13,9 +16,11 @@ class SkillRegistry {
     this.registerMany(webSkills);
     this.registerMany(productivitySkills);
     this.registerMany(agentSkills);
+    log.info("Skill registry initialized", { totalSkills: this.skills.size });
   }
 
   register(skill: SkillDefinition): void {
+    log.debug("Registering skill", { skillId: skill.id });
     this.skills.set(skill.id, skill);
   }
 
@@ -26,15 +31,21 @@ class SkillRegistry {
   }
 
   get(id: string): SkillDefinition | undefined {
-    return this.skills.get(id);
+    const skill = this.skills.get(id);
+    log.debug("Getting skill", { id, found: !!skill });
+    return skill;
   }
 
   getAll(): SkillDefinition[] {
-    return Array.from(this.skills.values());
+    const all = Array.from(this.skills.values());
+    log.debug("Getting all skills", { count: all.length });
+    return all;
   }
 
   getByCategory(category: string): SkillDefinition[] {
-    return this.getAll().filter((s) => s.category === category);
+    const results = this.getAll().filter((s) => s.category === category);
+    log.debug("Getting skills by category", { category, count: results.length });
+    return results;
   }
 
   /**

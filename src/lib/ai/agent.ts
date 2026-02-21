@@ -8,6 +8,9 @@ import { audit } from "@/lib/audit";
 import { mcpManager } from "@/lib/mcp/client";
 import { getToolApprovalRequirement } from "@/lib/mcp/permissions";
 import type { SkillContext, SkillResult } from "@/lib/skills/types";
+import { getLogger } from "@/lib/logger";
+
+const log = getLogger("ai.agent");
 
 const SYSTEM_PROMPT = `You are OpenAssistant, a personal AI assistant with persistent memory and extensible skills.
 
@@ -41,11 +44,15 @@ Guidelines:
  * Includes both built-in skills and skills from connected integrations.
  */
 function buildTools(context: SkillContext) {
+  log.debug("buildTools started", { userId: context.userId });
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const tools: Record<string, any> = {};
 
   // Register built-in skills
   for (const skill of skillRegistry.getAll()) {
+    log.debug("registering built-in skill", { skillId: skill.id });
+
     const shape: Record<string, z.ZodTypeAny> = {};
 
     for (const param of skill.parameters) {
@@ -67,27 +74,42 @@ function buildTools(context: SkillContext) {
       description: skill.description,
       parameters: z.object(shape),
       execute: async (args) => {
+        log.info("executing built-in skill", { skillId: skill.id, userId: context.userId });
         const startMs = Date.now();
         let result: SkillResult;
         try {
           result = await skill.execute(args as Record<string, unknown>, context);
+          const durationMs = Date.now() - startMs;
+          log.info("built-in skill completed", {
+            skillId: skill.id,
+            userId: context.userId,
+            durationMs,
+            success: result.success,
+          });
           audit({
             userId: context.userId,
             action: "skill_execute",
             skillId: skill.id,
             input: args,
             output: result.output,
-            durationMs: Date.now() - startMs,
+            durationMs,
             success: result.success,
           });
         } catch (err) {
+          const durationMs = Date.now() - startMs;
+          log.error("built-in skill failed with exception", {
+            skillId: skill.id,
+            userId: context.userId,
+            durationMs,
+            error: err instanceof Error ? err.message : String(err),
+          });
           audit({
             userId: context.userId,
             action: "skill_execute",
             skillId: skill.id,
             input: args,
             output: err instanceof Error ? err.message : String(err),
-            durationMs: Date.now() - startMs,
+            durationMs,
             success: false,
           });
           throw err;
@@ -100,6 +122,12 @@ function buildTools(context: SkillContext) {
   // Register tools from connected integrations (user-scoped)
   for (const instance of integrationRegistry.getActiveInstancesForUser(context.userId)) {
     for (const integrationSkill of instance.definition.skills) {
+      log.debug("registering integration tool", {
+        toolId: integrationSkill.id,
+        integrationId: instance.definition.id,
+        integrationName: instance.definition.name,
+      });
+
       const shape: Record<string, z.ZodTypeAny> = {};
 
       for (const param of integrationSkill.parameters) {
@@ -121,9 +149,22 @@ function buildTools(context: SkillContext) {
         description: `[${instance.definition.name}] ${integrationSkill.description}`,
         parameters: z.object(shape),
         execute: async (args) => {
+          log.info("executing integration tool", {
+            toolId: integrationSkill.id,
+            integrationId: instance.definition.id,
+            userId: context.userId,
+          });
           const startMs = Date.now();
           try {
             const result = await instance.executeSkill(integrationSkill.id, args as Record<string, unknown>);
+            const durationMs = Date.now() - startMs;
+            log.info("integration tool completed", {
+              toolId: integrationSkill.id,
+              integrationId: instance.definition.id,
+              userId: context.userId,
+              durationMs,
+              success: true,
+            });
             audit({
               userId: context.userId,
               action: "tool_call",
@@ -131,10 +172,18 @@ function buildTools(context: SkillContext) {
               source: instance.definition.id,
               input: args,
               output: result,
-              durationMs: Date.now() - startMs,
+              durationMs,
             });
             return result;
           } catch (err) {
+            const durationMs = Date.now() - startMs;
+            log.error("integration tool failed with exception", {
+              toolId: integrationSkill.id,
+              integrationId: instance.definition.id,
+              userId: context.userId,
+              durationMs,
+              error: err instanceof Error ? err.message : String(err),
+            });
             audit({
               userId: context.userId,
               action: "tool_call",
@@ -142,7 +191,7 @@ function buildTools(context: SkillContext) {
               source: instance.definition.id,
               input: args,
               output: err instanceof Error ? err.message : String(err),
-              durationMs: Date.now() - startMs,
+              durationMs,
               success: false,
             });
             throw err;
@@ -156,6 +205,13 @@ function buildTools(context: SkillContext) {
   const mcpTools = mcpManager.getToolsForUser(context.userId);
   for (const mcpTool of mcpTools) {
     const toolId = `mcp_${mcpTool.serverId}_${mcpTool.name}`.replace(/[^a-zA-Z0-9_]/g, "_");
+
+    log.debug("registering MCP tool", {
+      toolId,
+      mcpServerId: mcpTool.serverId,
+      mcpServerName: mcpTool.serverName,
+      mcpToolName: mcpTool.name,
+    });
 
     // Convert JSON Schema to Zod schema
     const shape: Record<string, z.ZodTypeAny> = {};
@@ -201,6 +257,12 @@ function buildTools(context: SkillContext) {
       description: desc,
       parameters: z.object(shape),
       execute: async (args) => {
+        log.info("executing MCP tool", {
+          toolId,
+          mcpServerId: mcpTool.serverId,
+          mcpToolName: mcpTool.name,
+          userId: context.userId,
+        });
         const startMs = Date.now();
         try {
           const result = await mcpManager.callTool(
@@ -208,6 +270,15 @@ function buildTools(context: SkillContext) {
             mcpTool.name,
             args as Record<string, unknown>
           );
+          const durationMs = Date.now() - startMs;
+          log.info("MCP tool completed", {
+            toolId,
+            mcpServerId: mcpTool.serverId,
+            mcpToolName: mcpTool.name,
+            userId: context.userId,
+            durationMs,
+            success: !result.isError,
+          });
           audit({
             userId: context.userId,
             action: "mcp_tool_call",
@@ -215,7 +286,7 @@ function buildTools(context: SkillContext) {
             source: `mcp:${mcpTool.serverId}`,
             input: args,
             output: result.content,
-            durationMs: Date.now() - startMs,
+            durationMs,
             success: !result.isError,
           });
           return {
@@ -227,6 +298,15 @@ function buildTools(context: SkillContext) {
             data: result.content,
           };
         } catch (err) {
+          const durationMs = Date.now() - startMs;
+          log.error("MCP tool failed with exception", {
+            toolId,
+            mcpServerId: mcpTool.serverId,
+            mcpToolName: mcpTool.name,
+            userId: context.userId,
+            durationMs,
+            error: err instanceof Error ? err.message : String(err),
+          });
           audit({
             userId: context.userId,
             action: "mcp_tool_call",
@@ -234,7 +314,7 @@ function buildTools(context: SkillContext) {
             source: `mcp:${mcpTool.serverId}`,
             input: args,
             output: err instanceof Error ? err.message : String(err),
-            durationMs: Date.now() - startMs,
+            durationMs,
             success: false,
           });
           return {
@@ -245,6 +325,9 @@ function buildTools(context: SkillContext) {
       },
     });
   }
+
+  const totalToolCount = Object.keys(tools).length;
+  log.info("buildTools completed", { userId: context.userId, totalToolCount });
 
   return tools;
 }
@@ -258,15 +341,24 @@ export async function streamAgentResponse(params: {
   conversationId: string;
   memoryContext?: string;
 }) {
+  log.info("streamAgentResponse started", {
+    userId: params.userId,
+    conversationId: params.conversationId,
+    messageCount: params.messages.length,
+    hasMemoryContext: !!params.memoryContext,
+  });
+
   const context: SkillContext = {
     userId: params.userId,
     conversationId: params.conversationId,
   };
 
   // Hydrate user's enabled integrations from DB so their tools are available
+  log.debug("hydrating user integrations", { userId: params.userId });
   await integrationRegistry.hydrateUserIntegrations(params.userId);
 
   // Hydrate MCP server connections
+  log.debug("hydrating MCP connections", { userId: params.userId });
   await mcpManager.hydrateUserConnections(params.userId);
   await mcpManager.hydrateGlobalConnections();
 
@@ -283,8 +375,15 @@ export async function streamAgentResponse(params: {
 
   const allMessages = [...systemMessages, ...params.messages];
 
+  const model = await resolveModelFromSettings();
+  log.info("starting stream", {
+    userId: params.userId,
+    conversationId: params.conversationId,
+    model: String(model.modelId ?? model),
+  });
+
   return streamText({
-    model: await resolveModelFromSettings(),
+    model,
     messages: allMessages,
     tools: buildTools(context),
     maxSteps: 10,
@@ -300,15 +399,24 @@ export async function generateAgentResponse(params: {
   conversationId: string;
   memoryContext?: string;
 }): Promise<string> {
+  log.info("generateAgentResponse started", {
+    userId: params.userId,
+    conversationId: params.conversationId,
+    messageCount: params.messages.length,
+    hasMemoryContext: !!params.memoryContext,
+  });
+
   const context: SkillContext = {
     userId: params.userId,
     conversationId: params.conversationId,
   };
 
   // Hydrate user's enabled integrations from DB so their tools are available
+  log.debug("hydrating user integrations", { userId: params.userId });
   await integrationRegistry.hydrateUserIntegrations(params.userId);
 
   // Hydrate MCP server connections
+  log.debug("hydrating MCP connections", { userId: params.userId });
   await mcpManager.hydrateUserConnections(params.userId);
   await mcpManager.hydrateGlobalConnections();
 
@@ -325,11 +433,20 @@ export async function generateAgentResponse(params: {
 
   const allMessages = [...systemMessages, ...params.messages];
 
+  const generateStartMs = Date.now();
   const result = await generateText({
     model: await resolveModelFromSettings(),
     messages: allMessages,
     tools: buildTools(context),
     maxSteps: 10,
+  });
+  const generateDurationMs = Date.now() - generateStartMs;
+
+  log.info("generateAgentResponse completed", {
+    userId: params.userId,
+    conversationId: params.conversationId,
+    responseLength: result.text.length,
+    durationMs: generateDurationMs,
   });
 
   return result.text;

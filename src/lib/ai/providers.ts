@@ -1,6 +1,9 @@
 import { createOpenAI } from "@ai-sdk/openai";
 import type { LanguageModelV1 } from "ai";
 import { getEffectiveAIConfig } from "@/lib/settings";
+import { getLogger, maskSecret } from "@/lib/logger";
+
+const log = getLogger("ai.providers");
 
 /**
  * Supported AI provider identifiers.
@@ -127,12 +130,20 @@ const PROVIDER_DEFAULTS: Record<
 export function resolveModel(config: ModelConfig): LanguageModelV1 {
   const defaults = PROVIDER_DEFAULTS[config.provider];
   if (!defaults) {
+    log.error("Unknown AI provider requested", { provider: config.provider });
     throw new Error(`Unknown AI provider: ${config.provider}`);
   }
 
   const baseURL = config.baseUrl || defaults.baseUrl;
   const apiKey = config.apiKey || (defaults.envKey ? process.env[defaults.envKey] : undefined) || "";
   const modelId = config.model || defaults.defaultModel;
+
+  log.info("Resolving AI model", {
+    provider: config.provider,
+    modelId,
+    baseURL,
+    apiKey: maskSecret(apiKey),
+  });
 
   const client = createOpenAI({
     baseURL,
@@ -148,12 +159,21 @@ export function resolveModel(config: ModelConfig): LanguageModelV1 {
  * This is the primary entry point — use this in all server-side code.
  */
 export async function resolveModelFromSettings(): Promise<LanguageModelV1> {
+  log.debug("Resolving model from settings");
+
   const config = await getEffectiveAIConfig();
 
   const configProvider = (config.provider || "openai") as AIProvider;
   const modelStr = config.model || "";
 
   if (modelStr) {
+    log.info("Resolved model from settings", {
+      provider: configProvider,
+      model: modelStr,
+      baseUrl: config.baseUrl || undefined,
+      apiKey: maskSecret(config.apiKey),
+    });
+
     return resolveModel({
       provider: configProvider,
       model: modelStr,
@@ -161,6 +181,10 @@ export async function resolveModelFromSettings(): Promise<LanguageModelV1> {
       baseUrl: config.baseUrl || undefined,
     });
   }
+
+  log.debug("No model string in settings, falling back to provider default", {
+    provider: configProvider,
+  });
 
   const defaults = PROVIDER_DEFAULTS[configProvider];
   return resolveModel({
@@ -175,10 +199,14 @@ export async function resolveModelFromSettings(): Promise<LanguageModelV1> {
  * Get the list of all supported providers with their default models.
  */
 export function getProviderList() {
-  return Object.entries(PROVIDER_DEFAULTS).map(([id, config]) => ({
+  const list = Object.entries(PROVIDER_DEFAULTS).map(([id, config]) => ({
     id: id as AIProvider,
     defaultModel: config.defaultModel,
     envKey: config.envKey,
     baseUrl: config.baseUrl,
   }));
+
+  log.debug("Returning provider list", { providerCount: list.length });
+
+  return list;
 }

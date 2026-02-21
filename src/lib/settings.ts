@@ -1,5 +1,8 @@
 import { prisma } from "@/lib/prisma";
 import type { AppSettings } from "@prisma/client";
+import { getLogger, maskSecret } from "@/lib/logger";
+
+const log = getLogger("settings");
 
 const SETTINGS_ID = "singleton";
 
@@ -42,12 +45,15 @@ export const PROVIDER_KEY_COLUMN: Record<string, keyof AppSettings> = {
  * Returns the DB row merged over env defaults — DB values win when set.
  */
 export async function getSettings(): Promise<AppSettings> {
+  log.debug("Fetching settings from database");
   let row = await prisma.appSettings.findUnique({ where: { id: SETTINGS_ID } });
 
   if (!row) {
+    log.info("No settings row found — creating default singleton");
     row = await prisma.appSettings.create({ data: { id: SETTINGS_ID } });
   }
 
+  log.debug("Settings loaded", { provider: row.aiProvider, model: row.aiModel });
   return row;
 }
 
@@ -57,11 +63,14 @@ export async function getSettings(): Promise<AppSettings> {
 export async function updateSettings(
   data: Partial<Omit<AppSettings, "id" | "updatedAt">>
 ): Promise<AppSettings> {
-  return prisma.appSettings.upsert({
+  log.info("Updating settings", { fields: Object.keys(data) });
+  const result = await prisma.appSettings.upsert({
     where: { id: SETTINGS_ID },
     create: { id: SETTINGS_ID, ...data },
     update: data,
   });
+  log.info("Settings updated successfully", { updatedAt: result.updatedAt });
+  return result;
 }
 
 /**
@@ -69,6 +78,7 @@ export async function updateSettings(
  * This is the single source of truth used by both providers.ts and the RAG server.
  */
 export async function getEffectiveAIConfig() {
+  log.debug("Resolving effective AI config");
   const s = await getSettings();
 
   const provider = s.aiProvider || process.env.AI_PROVIDER || "openai";
@@ -80,6 +90,16 @@ export async function getEffectiveAIConfig() {
   const dbKey = col ? (s[col] as string | null) : null;
   const envKeyName = KEY_ENV_MAP[col as string] || "";
   const apiKey = dbKey || (envKeyName ? process.env[envKeyName] || "" : "");
+
+  const keySource = dbKey ? "database" : envKeyName && process.env[envKeyName] ? "env" : "none";
+
+  log.info("Effective AI config resolved", {
+    provider,
+    model: model || "(default)",
+    baseUrl: baseUrl || "(default)",
+    apiKeySource: keySource,
+    apiKeyMasked: maskSecret(apiKey),
+  });
 
   // Embedding — resolve provider, then derive defaults from it
   const embeddingProvider = s.embeddingProvider || process.env.EMBEDDING_PROVIDER || "";
@@ -103,6 +123,14 @@ export async function getEffectiveAIConfig() {
     // Same provider — fall back to LLM provider's key and base URL
     embeddingApiKey = embeddingApiKey || apiKey;
     embeddingBaseUrl = embeddingBaseUrl || baseUrl;
+  }
+
+  if (embeddingProvider) {
+    log.debug("Embedding config resolved", {
+      embeddingProvider,
+      embeddingModel,
+      embeddingBaseUrl: embeddingBaseUrl || "(default)",
+    });
   }
 
   return {
