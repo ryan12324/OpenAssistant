@@ -14,6 +14,7 @@ const {
   mockGenerateText,
   mockResolveModelFromSettings,
   mockLog,
+  mockHandleApiError,
 } = vi.hoisted(() => ({
   mockRequireSession: vi.fn(),
   mockPrisma: {
@@ -27,6 +28,12 @@ const {
   mockGenerateText: vi.fn(),
   mockResolveModelFromSettings: vi.fn(),
   mockLog: { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
+  mockHandleApiError: vi.fn((error: unknown) => {
+    if (error instanceof Error && error.message === "Unauthorized") {
+      return Response.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    return Response.json({ error: "Internal server error" }, { status: 500 });
+  }),
 }));
 
 vi.mock("@/lib/auth-server", () => ({
@@ -62,6 +69,10 @@ vi.mock("@/lib/logger", () => ({
   getLogger: () => mockLog,
 }));
 
+vi.mock("@/lib/api-utils", () => ({
+  handleApiError: (...args: unknown[]) => mockHandleApiError(...args),
+}));
+
 // ---------------------------------------------------------------------------
 // Import after mocks
 // ---------------------------------------------------------------------------
@@ -85,6 +96,8 @@ function makeStreamResult(textValue: string) {
   const textPromise = new Promise<string>((resolve) => {
     resolveText = resolve;
   });
+  // Add .catch to textPromise.then chain to match source code's .catch handler
+  const originalThen = textPromise.then.bind(textPromise);
   return {
     result: {
       text: textPromise,
@@ -618,8 +631,7 @@ describe("POST /api/chat", () => {
   });
 
   it("returns 500 with non-Error thrown value in catch block", async () => {
-    // We need the outer catch to receive a non-Error to cover lines 227-228
-    // (error instanceof Error ? error.message : String(error))
+    // We need the outer catch to receive a non-Error to cover the handleApiError path
     mockRequireSession.mockResolvedValue({ user: { id: "user-1" } });
     // Make prisma.conversation.create throw a non-Error value
     mockPrisma.conversation.create.mockRejectedValue("non-error-string");
@@ -632,10 +644,7 @@ describe("POST /api/chat", () => {
 
     expect(res.status).toBe(500);
     expect(json).toEqual({ error: "Internal server error" });
-    expect(mockLog.error).toHaveBeenCalledWith("Chat error", expect.objectContaining({
-      error: "non-error-string",
-      stack: undefined,
-    }));
+    expect(mockHandleApiError).toHaveBeenCalledWith("non-error-string", "process chat");
   });
 
   it("handles lastMessage with non-string content in text promise branch", async () => {
@@ -661,6 +670,37 @@ describe("POST /api/chat", () => {
       expect.objectContaining({
         content: expect.stringContaining('User asked: ""'),
       })
+    );
+  });
+
+  it("catches errors in the fire-and-forget .then chain via .catch", async () => {
+    mockRequireSession.mockResolvedValue({ user: { id: "user-1" } });
+    mockPrisma.message.create.mockResolvedValue({});
+
+    // Create a text promise that rejects to trigger the .catch handler
+    const textPromise = Promise.reject(new Error("stream exploded"));
+    const result = {
+      text: textPromise,
+      toDataStreamResponse: vi.fn(({ headers }: { headers: Record<string, string> }) =>
+        new Response("stream-body", { headers })
+      ),
+    };
+    mockStreamAgentResponse.mockResolvedValue(result);
+
+    const req = makeRequest({
+      messages: [{ role: "user", content: "hello" }],
+      conversationId: "conv-1",
+    });
+    const res = await POST(req as any);
+
+    expect(res.status).toBe(200);
+
+    // Allow microtasks to flush so the .catch handler runs
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(mockLog.error).toHaveBeenCalledWith(
+      "Post-stream processing failed",
+      expect.objectContaining({ error: expect.any(Error) })
     );
   });
 });
