@@ -159,6 +159,29 @@ export function Sidebar() {
             Integrations
           </Link>
           <Link
+            href="/mcp"
+            className={cn(
+              "flex items-center gap-2 rounded-md px-3 py-2 text-sm",
+              pathname === "/mcp"
+                ? "bg-muted text-foreground"
+                : "text-muted-foreground hover:bg-muted hover:text-foreground"
+            )}
+          >
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
+              <rect x="2" y="3" width="20" height="6" rx="1" />
+              <rect x="2" y="15" width="20" height="6" rx="1" />
+              <path d="M12 9v6" />
+            </svg>
+            MCP Servers
+          </Link>
+          <Link
             href="/teams"
             className={cn(
               "flex items-center gap-2 rounded-md px-3 py-2 text-sm",
