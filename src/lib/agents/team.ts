@@ -1,4 +1,5 @@
 import { generateText } from "ai";
+import { AgentNode } from "./agent-node";
 import { resolveModelFromSettings } from "@/lib/ai/providers";
 import { initializeNodes, recordAgentExecution } from "./utils";
 import type { TranscriptEntry, AgentResult } from "./utils";
@@ -190,8 +191,8 @@ export class TeamOrchestrator {
     start: number
   ): Promise<TeamRunResult> {
     const maxRounds = this.definition.maxRounds || 2;
-    const transcript: AgentMessage[] = [];
-    const agentResults: TeamRunResult["agentResults"] = [];
+    const transcript: TranscriptEntry[] = [];
+    const agentResults: AgentResult[] = [];
 
     // Each agent takes an initial position
     for (const agent of this.definition.agents) {
@@ -204,19 +205,7 @@ export class TeamOrchestrator {
         conversationId: config.conversationId,
       });
 
-      transcript.push({
-        agentId: agent.id,
-        agentName: agent.name,
-        role: "agent",
-        content: result.output,
-        timestamp: new Date(),
-      });
-      agentResults.push({
-        agentId: agent.id,
-        agentName: agent.name,
-        output: result.output,
-        durationMs: result.durationMs,
-      });
+      recordAgentExecution(transcript, agentResults, agent, result);
     }
 
     // Rebuttal rounds
@@ -231,19 +220,7 @@ export class TeamOrchestrator {
           conversationId: config.conversationId,
         });
 
-        transcript.push({
-          agentId: agent.id,
-          agentName: agent.name,
-          role: "agent",
-          content: result.output,
-          timestamp: new Date(),
-        });
-        agentResults.push({
-          agentId: agent.id,
-          agentName: agent.name,
-          output: result.output,
-          durationMs: result.durationMs,
-        });
+        recordAgentExecution(transcript, agentResults, agent, result);
       }
     }
 
@@ -264,8 +241,8 @@ export class TeamOrchestrator {
     config: TeamRunConfig,
     start: number
   ): Promise<TeamRunResult> {
-    const transcript: AgentMessage[] = [];
-    const agentResults: TeamRunResult["agentResults"] = [];
+    const transcript: TranscriptEntry[] = [];
+    const agentResults: AgentResult[] = [];
 
     let pipelineInput = config.task;
 
@@ -278,19 +255,7 @@ export class TeamOrchestrator {
         conversationId: config.conversationId,
       });
 
-      transcript.push({
-        agentId: agent.id,
-        agentName: agent.name,
-        role: "agent",
-        content: result.output,
-        timestamp: new Date(),
-      });
-      agentResults.push({
-        agentId: agent.id,
-        agentName: agent.name,
-        output: result.output,
-        durationMs: result.durationMs,
-      });
+      recordAgentExecution(transcript, agentResults, agent, result);
 
       // Output of this agent becomes the input for the next
       pipelineInput = result.output;
@@ -311,8 +276,8 @@ export class TeamOrchestrator {
     config: TeamRunConfig,
     start: number
   ): Promise<TeamRunResult> {
-    const transcript: AgentMessage[] = [];
-    const agentResults: TeamRunResult["agentResults"] = [];
+    const transcript: TranscriptEntry[] = [];
+    const agentResults: AgentResult[] = [];
     const supervisorId = this.definition.supervisorId || this.definition.agents[0]?.id;
     const supervisor = this.nodes.get(supervisorId!);
 

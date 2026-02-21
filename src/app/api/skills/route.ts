@@ -1,6 +1,7 @@
 import { requireSession } from "@/lib/auth-server";
 import { skillRegistry } from "@/lib/skills/registry";
 import { getLogger } from "@/lib/logger";
+import { handleApiError } from "@/lib/api-utils";
 
 const log = getLogger("api.skills");
 
@@ -20,9 +21,6 @@ export async function GET() {
     log.debug("Skills retrieved", { count: skills.length });
     return Response.json({ skills });
   } catch (error) {
-    if (error instanceof Error && error.message === "Unauthorized") {
-      return Response.json({ error: "Unauthorized" }, { status: 401 });
-    }
-    return Response.json({ error: "Internal server error" }, { status: 500 });
+    return handleApiError(error, "list skills");
   }
 }

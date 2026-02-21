@@ -112,5 +112,54 @@ describe("BrowserInstance", () => {
       expect(result.success).toBe(false);
       expect(result.output).toContain("Unknown skill");
     });
+
+    describe("env var overrides", () => {
+      afterEach(() => {
+        delete process.env.FETCH_TIMEOUT_MS;
+        delete process.env.USER_AGENT;
+      });
+
+      it("should use FETCH_TIMEOUT_MS env var when set", async () => {
+        process.env.FETCH_TIMEOUT_MS = "3000";
+        const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
+        mockFetch.mockResolvedValueOnce({
+          ok: true,
+          text: () => Promise.resolve("<p>Content</p>"),
+        });
+
+        await instance.executeSkill("browser_extract_text", { url: "https://example.com" });
+
+        expect(timeoutSpy).toHaveBeenCalledWith(3000);
+        timeoutSpy.mockRestore();
+      });
+
+      it("should use USER_AGENT env var when set", async () => {
+        process.env.USER_AGENT = "TestBot/2.0";
+        mockFetch.mockResolvedValueOnce({
+          ok: true,
+          text: () => Promise.resolve("<p>Content</p>"),
+        });
+
+        await instance.executeSkill("browser_extract_text", { url: "https://example.com" });
+
+        const [, options] = mockFetch.mock.calls[0];
+        expect(options.headers["User-Agent"]).toBe("TestBot/2.0");
+      });
+
+      it("should use default values when env vars are not set", async () => {
+        const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
+        mockFetch.mockResolvedValueOnce({
+          ok: true,
+          text: () => Promise.resolve("<p>Content</p>"),
+        });
+
+        await instance.executeSkill("browser_extract_text", { url: "https://example.com" });
+
+        expect(timeoutSpy).toHaveBeenCalledWith(10000);
+        const [, options] = mockFetch.mock.calls[0];
+        expect(options.headers["User-Agent"]).toBe("OpenAssistant/0.1");
+        timeoutSpy.mockRestore();
+      });
+    });
   });
 });

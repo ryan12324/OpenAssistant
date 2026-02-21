@@ -87,5 +87,79 @@ describe("VoiceInstance", () => {
       expect(result.success).toBe(false);
       expect(result.output).toContain("Unknown skill");
     });
+
+    describe("configurable voice ID and model", () => {
+      afterEach(() => {
+        delete process.env.ELEVENLABS_VOICE_ID;
+        delete process.env.ELEVENLABS_MODEL;
+      });
+
+      it("should use config voiceId and model when provided", async () => {
+        const inst = new VoiceInstance(voiceIntegration, {
+          provider: "elevenlabs",
+          apiKey: "key",
+          voiceId: "custom-voice-id",
+          model: "eleven_multilingual_v2",
+        });
+        await inst.connect();
+        mockFetch.mockResolvedValueOnce({ ok: true });
+
+        await inst.executeSkill("voice_speak", { text: "Hello" });
+
+        const [url, options] = mockFetch.mock.calls[0];
+        expect(url).toContain("custom-voice-id");
+        expect(url).not.toContain("21m00Tcm4TlvDq8ikWAM");
+        const body = JSON.parse(options.body);
+        expect(body.model_id).toBe("eleven_multilingual_v2");
+      });
+
+      it("should use ELEVENLABS_VOICE_ID env var when config not provided", async () => {
+        process.env.ELEVENLABS_VOICE_ID = "env-voice-id";
+        process.env.ELEVENLABS_MODEL = "env-model";
+        const inst = new VoiceInstance(voiceIntegration, { provider: "elevenlabs", apiKey: "key" });
+        await inst.connect();
+        mockFetch.mockResolvedValueOnce({ ok: true });
+
+        await inst.executeSkill("voice_speak", { text: "Hello" });
+
+        const [url, options] = mockFetch.mock.calls[0];
+        expect(url).toContain("env-voice-id");
+        const body = JSON.parse(options.body);
+        expect(body.model_id).toBe("env-model");
+      });
+
+      it("should use default voice ID and model when neither config nor env var is set", async () => {
+        const inst = new VoiceInstance(voiceIntegration, { provider: "elevenlabs", apiKey: "key" });
+        await inst.connect();
+        mockFetch.mockResolvedValueOnce({ ok: true });
+
+        await inst.executeSkill("voice_speak", { text: "Hello" });
+
+        const [url, options] = mockFetch.mock.calls[0];
+        expect(url).toContain("21m00Tcm4TlvDq8ikWAM");
+        const body = JSON.parse(options.body);
+        expect(body.model_id).toBe("eleven_monolingual_v1");
+      });
+
+      it("should prefer config over env var", async () => {
+        process.env.ELEVENLABS_VOICE_ID = "env-voice-id";
+        process.env.ELEVENLABS_MODEL = "env-model";
+        const inst = new VoiceInstance(voiceIntegration, {
+          provider: "elevenlabs",
+          apiKey: "key",
+          voiceId: "config-voice-id",
+          model: "config-model",
+        });
+        await inst.connect();
+        mockFetch.mockResolvedValueOnce({ ok: true });
+
+        await inst.executeSkill("voice_speak", { text: "Hello" });
+
+        const [url, options] = mockFetch.mock.calls[0];
+        expect(url).toContain("config-voice-id");
+        const body = JSON.parse(options.body);
+        expect(body.model_id).toBe("config-model");
+      });
+    });
   });
 });

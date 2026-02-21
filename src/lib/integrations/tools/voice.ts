@@ -1,7 +1,7 @@
 import type { IntegrationDefinition, IntegrationConfig } from "../types";
 import { BaseIntegration } from "../base";
 
-interface VoiceConfig extends IntegrationConfig { provider: string; apiKey?: string; wakeWord?: string; }
+interface VoiceConfig extends IntegrationConfig { provider: string; apiKey?: string; wakeWord?: string; voiceId?: string; model?: string; }
 
 export const voiceIntegration: IntegrationDefinition<VoiceConfig> = {
   id: "voice", name: "Voice", description: "Voice wake and talk mode. Always-on speech with ElevenLabs, OpenAI, or browser TTS.",
@@ -28,10 +28,12 @@ export class VoiceInstance extends BaseIntegration<VoiceConfig> {
   protected async handleSkill(skillId: string, args: Record<string, unknown>) {
     if (skillId === "voice_speak") {
       if (this.config.provider === "elevenlabs" && this.config.apiKey) {
-        const res = await fetch("https://api.elevenlabs.io/v1/text-to-speech/21m00Tcm4TlvDq8ikWAM", {
+        const voiceId = this.config.voiceId ?? process.env.ELEVENLABS_VOICE_ID ?? "21m00Tcm4TlvDq8ikWAM";
+        const model = this.config.model ?? process.env.ELEVENLABS_MODEL ?? "eleven_monolingual_v1";
+        const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
           method: "POST",
           headers: { "xi-api-key": this.config.apiKey, "Content-Type": "application/json" },
-          body: JSON.stringify({ text: args.text, model_id: "eleven_monolingual_v1" }),
+          body: JSON.stringify({ text: args.text, model_id: model }),
         });
         if (res.ok) return { success: true, output: "Speech generated via ElevenLabs" };
       }

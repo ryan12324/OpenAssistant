@@ -5,8 +5,51 @@ import { mcpManager } from "@/lib/mcp/client";
 import { loadGlobalMcpServers } from "@/lib/mcp/global-config";
 import { getToolPermissionLabel } from "@/lib/mcp/permissions";
 import { getLogger } from "@/lib/logger";
+import { handleApiError } from "@/lib/api-utils";
 
 const log = getLogger("api.mcp");
+
+interface McpLiveState {
+  config: { id: string };
+  status: string;
+  error: string | null;
+  tools: Array<{ name: string; description: string }>;
+  connectedAt: string | null;
+}
+
+/** Map a server config + optional live state to a response object. */
+function mapServerToResponse(
+  server: {
+    id: string;
+    name: string;
+    transport: string;
+    command?: string | null;
+    args?: string | null;
+    url?: string | null;
+    enabled: boolean;
+    scope: "user" | "global";
+  },
+  liveState: McpLiveState | undefined
+) {
+  return {
+    id: server.id,
+    name: server.name,
+    transport: server.transport,
+    command: server.command ?? undefined,
+    args: server.args ? JSON.parse(server.args) : (server.args === null ? null : undefined),
+    url: server.url ?? undefined,
+    enabled: server.enabled,
+    scope: server.scope,
+    status: liveState?.status ?? (server.scope === "user" && !server.enabled ? "disabled" : "disconnected"),
+    error: liveState?.error ?? null,
+    tools: (liveState?.tools ?? []).map((t) => ({
+      name: t.name,
+      description: t.description,
+      permission: getToolPermissionLabel(t),
+    })),
+    connectedAt: liveState?.connectedAt ?? null,
+  };
+}
 
 /**
  * GET /api/mcp — List all MCP servers for the current user.
@@ -35,47 +78,37 @@ export async function GET() {
     const userServers = dbServers.map((row) => {
       const liveId = `user:${userId}:${row.id}`;
       const live = states.find((s) => s.config.id === liveId);
-      return {
-        id: row.id,
-        name: row.name,
-        transport: row.transport,
-        command: row.command,
-        args: row.args ? JSON.parse(row.args) : null,
-        url: row.url,
-        enabled: row.enabled,
-        scope: "user",
-        status: live?.status ?? (row.enabled ? "disconnected" : "disabled"),
-        error: live?.error ?? null,
-        tools: (live?.tools ?? []).map((t) => ({
-          name: t.name,
-          description: t.description,
-          permission: getToolPermissionLabel(t),
-        })),
-        connectedAt: live?.connectedAt ?? null,
-      };
+      return mapServerToResponse(
+        {
+          id: row.id,
+          name: row.name,
+          transport: row.transport,
+          command: row.command,
+          args: row.args,
+          url: row.url,
+          enabled: row.enabled,
+          scope: "user",
+        },
+        live as McpLiveState | undefined
+      );
     });
 
     // Global servers (read-only)
     const globalConfigs = await loadGlobalMcpServers();
     const globalServers = globalConfigs.map((config) => {
       const live = states.find((s) => s.config.id === config.id);
-      return {
-        id: config.id,
-        name: config.name,
-        transport: config.transport,
-        command: config.command,
-        url: config.url,
-        enabled: config.enabled,
-        scope: "global",
-        status: live?.status ?? "disconnected",
-        error: live?.error ?? null,
-        tools: (live?.tools ?? []).map((t) => ({
-          name: t.name,
-          description: t.description,
-          permission: getToolPermissionLabel(t),
-        })),
-        connectedAt: live?.connectedAt ?? null,
-      };
+      return mapServerToResponse(
+        {
+          id: config.id,
+          name: config.name,
+          transport: config.transport,
+          command: config.command,
+          url: config.url,
+          enabled: config.enabled,
+          scope: "global",
+        },
+        live as McpLiveState | undefined
+      );
     });
 
     log.info("MCP servers listed", {
@@ -86,12 +119,7 @@ export async function GET() {
 
     return Response.json({ servers: [...userServers, ...globalServers] });
   } catch (error) {
-    if (error instanceof Error && error.message === "Unauthorized") {
-      log.warn("Unauthorized access to MCP list");
-      return Response.json({ error: "Unauthorized" }, { status: 401 });
-    }
-    log.error("MCP list error", { error });
-    return Response.json({ error: "Internal server error" }, { status: 500 });
+    return handleApiError(error, "list MCP servers");
   }
 }
 
@@ -187,12 +215,7 @@ export async function POST(req: NextRequest) {
       })),
     });
   } catch (error) {
-    if (error instanceof Error && error.message === "Unauthorized") {
-      log.warn("Unauthorized access to MCP create");
-      return Response.json({ error: "Unauthorized" }, { status: 401 });
-    }
-    log.error("MCP create error", { error });
-    return Response.json({ error: "Internal server error" }, { status: 500 });
+    return handleApiError(error, "create MCP server");
   }
 }
 
@@ -231,11 +254,6 @@ export async function DELETE(req: NextRequest) {
 
     return Response.json({ deleted: true });
   } catch (error) {
-    if (error instanceof Error && error.message === "Unauthorized") {
-      log.warn("Unauthorized access to MCP delete");
-      return Response.json({ error: "Unauthorized" }, { status: 401 });
-    }
-    log.error("MCP delete error", { error });
-    return Response.json({ error: "Internal server error" }, { status: 500 });
+    return handleApiError(error, "delete MCP server");
   }
 }

@@ -141,12 +141,17 @@ type JobHandler = (type: string, payload: unknown) => Promise<unknown>;
 let handler: JobHandler | null = null;
 let polling = false;
 let timer: ReturnType<typeof setTimeout> | null = null;
+let initialized = false;
 
 const POLL_INTERVAL_MS = 2_000;
 
 /** Register the function that processes jobs. Call once at app startup. */
 export function registerHandler(fn: JobHandler) {
+  if (initialized) {
+    log.warn("Job handler already registered, replacing");
+  }
   handler = fn;
+  initialized = true;
   log.info("Job handler registered");
 }
 
@@ -160,7 +165,7 @@ function tickPoller() {
 
 /** Start the background poll loop. */
 export function startPoller() {
-  if (!handler) {
+  if (!initialized || !handler) {
     log.warn("No handler registered — call registerHandler() first");
     return;
   }

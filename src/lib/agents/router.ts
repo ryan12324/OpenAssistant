@@ -1,6 +1,7 @@
 import { generateText } from "ai";
 import { AgentNode } from "./agent-node";
 import { resolveModelFromSettings } from "@/lib/ai/providers";
+import { initializeNodes } from "./utils";
 import type { RouterDefinition, AgentEvent, AgentPersona } from "./types";
 
 /**
@@ -13,10 +14,7 @@ export class AgentRouter {
 
   constructor(definition: RouterDefinition) {
     this.definition = definition;
-    this.nodes = new Map();
-    for (const agent of definition.agents) {
-      this.nodes.set(agent.id, new AgentNode(agent));
-    }
+    this.nodes = initializeNodes(definition.agents);
   }
 
   /**

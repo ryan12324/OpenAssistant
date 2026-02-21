@@ -1,6 +1,7 @@
 import { generateText } from "ai";
 import { AgentNode } from "./agent-node";
 import { resolveModelFromSettings } from "@/lib/ai/providers";
+import { initializeNodes } from "./utils";
 import type {
   SwarmDefinition,
   SwarmRunConfig,
@@ -24,10 +25,7 @@ export class SwarmOrchestrator {
 
   constructor(definition: SwarmDefinition) {
     this.definition = definition;
-    this.nodes = new Map();
-    for (const agent of definition.agents) {
-      this.nodes.set(agent.id, new AgentNode(agent));
-    }
+    this.nodes = initializeNodes(definition.agents);
   }
 
   /**
@@ -36,7 +34,7 @@ export class SwarmOrchestrator {
   async run(config: SwarmRunConfig): Promise<SwarmRunResult> {
     const start = Date.now();
 
-    const timeoutMs = this.definition.agentTimeoutMs || 60000;
+    const timeoutMs = this.definition.agentTimeoutMs ?? Number(process.env.SWARM_TIMEOUT_MS ?? "60000");
 
     // Launch all agents in parallel
     const promises = this.definition.agents.map(async (agent) => {

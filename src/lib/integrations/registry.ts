@@ -71,6 +71,11 @@ import { peekabooIntegration, PeekabooInstance } from "./media/peekaboo";
 import { twitterIntegration, TwitterInstance } from "./social/twitter";
 import { emailIntegration, EmailInstance } from "./social/email";
 
+export interface HydrationResult {
+  loaded: string[];
+  failed: Array<{ id: string; error: string }>;
+}
+
 type InstanceConstructor = new (
   definition: IntegrationDefinition,
   config: IntegrationConfig
@@ -179,8 +184,10 @@ class IntegrationRegistry {
    * instances. Skips integrations that are already active for the user.
    * Safe to call on every request — uses a hydration cache.
    */
-  async hydrateUserIntegrations(userId: string): Promise<void> {
-    if (this.hydratedUsers.has(userId)) return;
+  async hydrateUserIntegrations(userId: string): Promise<HydrationResult> {
+    const result: HydrationResult = { loaded: [], failed: [] };
+
+    if (this.hydratedUsers.has(userId)) return result;
 
     log.info("Hydrating user integrations", { userId });
 
@@ -188,8 +195,6 @@ class IntegrationRegistry {
       const configs = await prisma.skillConfig.findMany({
         where: { userId, enabled: true },
       });
-
-      let hydratedCount = 0;
 
       for (const cfg of configs) {
         // Only hydrate integrations that have a registered definition
@@ -206,21 +211,25 @@ class IntegrationRegistry {
           const instance = await this.createUserInstance(userId, cfg.skillId, config);
           await instance.connect();
           log.debug("Hydrated integration", { userId, integrationId: cfg.skillId });
-          hydratedCount++;
+          result.loaded.push(cfg.skillId);
         } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
           log.warn(`Failed to hydrate integration "${cfg.skillId}"`, {
             userId,
             integrationId: cfg.skillId,
-            error: error instanceof Error ? error.message : String(error),
+            error: errorMessage,
           });
+          result.failed.push({ id: cfg.skillId, error: errorMessage });
         }
       }
 
       this.hydratedUsers.add(userId);
-      log.info("User integrations hydration complete", { userId, count: hydratedCount });
+      log.info("User integrations hydration complete", { userId, count: result.loaded.length });
     } catch (error) {
       log.error("Failed to hydrate integrations", { userId, error: error instanceof Error ? error.message : String(error) });
     }
+
+    return result;
   }
 
   /**

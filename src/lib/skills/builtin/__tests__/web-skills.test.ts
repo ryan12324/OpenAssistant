@@ -327,5 +327,77 @@ describe("web-skills", () => {
       expect(options.headers["User-Agent"]).toBe("OpenAssistant/0.1");
       expect(options.signal).toBeDefined();
     });
+
+    describe("env var overrides", () => {
+      afterEach(() => {
+        delete process.env.FETCH_TIMEOUT_MS;
+        delete process.env.USER_AGENT;
+        delete process.env.MAX_CONTENT_LENGTH;
+      });
+
+      it("uses FETCH_TIMEOUT_MS env var when set", async () => {
+        process.env.FETCH_TIMEOUT_MS = "5000";
+        const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
+        mockFetch.mockResolvedValue({
+          ok: true,
+          status: 200,
+          headers: { get: vi.fn().mockReturnValue("text/plain") },
+          text: vi.fn().mockResolvedValue("ok"),
+        });
+
+        await fetchUrl.execute({ url: "https://example.com" }, ctx);
+
+        expect(timeoutSpy).toHaveBeenCalledWith(5000);
+        timeoutSpy.mockRestore();
+      });
+
+      it("uses USER_AGENT env var when set", async () => {
+        process.env.USER_AGENT = "CustomAgent/1.0";
+        mockFetch.mockResolvedValue({
+          ok: true,
+          status: 200,
+          headers: { get: vi.fn().mockReturnValue("text/plain") },
+          text: vi.fn().mockResolvedValue("ok"),
+        });
+
+        await fetchUrl.execute({ url: "https://example.com" }, ctx);
+
+        const [, options] = mockFetch.mock.calls[0];
+        expect(options.headers["User-Agent"]).toBe("CustomAgent/1.0");
+      });
+
+      it("uses MAX_CONTENT_LENGTH env var when set", async () => {
+        process.env.MAX_CONTENT_LENGTH = "100";
+        const longText = "A".repeat(500);
+        mockFetch.mockResolvedValue({
+          ok: true,
+          status: 200,
+          headers: { get: vi.fn().mockReturnValue("text/plain") },
+          text: vi.fn().mockResolvedValue(longText),
+        });
+
+        const result = await fetchUrl.execute({ url: "https://example.com" }, ctx);
+
+        expect(result.success).toBe(true);
+        expect(result.data).toEqual({ url: "https://example.com", length: 100 });
+      });
+
+      it("uses default values when env vars are not set", async () => {
+        const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
+        mockFetch.mockResolvedValue({
+          ok: true,
+          status: 200,
+          headers: { get: vi.fn().mockReturnValue("text/plain") },
+          text: vi.fn().mockResolvedValue("ok"),
+        });
+
+        await fetchUrl.execute({ url: "https://example.com" }, ctx);
+
+        expect(timeoutSpy).toHaveBeenCalledWith(10000);
+        const [, options] = mockFetch.mock.calls[0];
+        expect(options.headers["User-Agent"]).toBe("OpenAssistant/0.1");
+        timeoutSpy.mockRestore();
+      });
+    });
   });
 });

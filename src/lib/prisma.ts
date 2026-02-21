@@ -14,7 +14,4 @@ if (isNew) {
   log.info("PrismaClient created", { env: process.env.NODE_ENV });
 }
 
-if (process.env.NODE_ENV !== "production") {
-  globalForPrisma.prisma = prisma;
-  log.debug("PrismaClient cached on globalThis (dev mode)");
-}
+globalForPrisma.prisma = prisma;

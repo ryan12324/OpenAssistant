@@ -14,8 +14,8 @@ import { getLogger } from "@/lib/logger";
 const log = getLogger("rag.client");
 
 const RAG_SERVER_URL =
-  process.env.RAG_SERVER_URL || "http://localhost:8020";
-const RAG_API_KEY = process.env.RAG_API_KEY || "";
+  process.env.RAG_SERVER_URL ?? "http://localhost:8020";
+const RAG_API_KEY = process.env.RAG_API_KEY ?? "";
 
 async function ragFetch<T>(
   path: string,

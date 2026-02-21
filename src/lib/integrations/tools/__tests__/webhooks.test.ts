@@ -108,5 +108,40 @@ describe("WebhooksInstance", () => {
       expect(result.success).toBe(false);
       expect(result.output).toContain("Unknown skill");
     });
+
+    describe("env var overrides", () => {
+      afterEach(() => {
+        delete process.env.FETCH_TIMEOUT_MS;
+      });
+
+      it("should use FETCH_TIMEOUT_MS env var when set", async () => {
+        process.env.FETCH_TIMEOUT_MS = "7000";
+        const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
+        mockFetch.mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          text: () => Promise.resolve("OK"),
+        });
+
+        await instance.executeSkill("webhook_send", { url: "https://hook.example.com" });
+
+        expect(timeoutSpy).toHaveBeenCalledWith(7000);
+        timeoutSpy.mockRestore();
+      });
+
+      it("should use default timeout when env var is not set", async () => {
+        const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
+        mockFetch.mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          text: () => Promise.resolve("OK"),
+        });
+
+        await instance.executeSkill("webhook_send", { url: "https://hook.example.com" });
+
+        expect(timeoutSpy).toHaveBeenCalledWith(10000);
+        timeoutSpy.mockRestore();
+      });
+    });
   });
 });

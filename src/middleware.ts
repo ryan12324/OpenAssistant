@@ -9,14 +9,18 @@ function logMiddleware(level: string, msg: string, ctx: Record<string, unknown> 
 }
 
 // Public routes that don't require authentication
-const publicRoutes = ["/sign-in", "/sign-up", "/api/auth"];
+const PUBLIC_ROUTES = (process.env.PUBLIC_ROUTES ?? "/sign-in,/sign-up,/api/auth").split(",");
+
+// Session cookie names (configurable via env)
+const SESSION_COOKIE = process.env.SESSION_COOKIE_NAME ?? "better-auth.session_token";
+const SESSION_COOKIE_ALT = process.env.SESSION_COOKIE_NAME_ALT ?? "__session";
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const method = request.method;
 
   // Allow public routes
-  if (publicRoutes.some((route) => pathname.startsWith(route))) {
+  if (PUBLIC_ROUTES.some((route) => pathname.startsWith(route))) {
     logMiddleware("debug", "Public route — allowed", { method, pathname });
     return NextResponse.next();
   }
@@ -29,8 +33,8 @@ export function middleware(request: NextRequest) {
 
   // Check for session cookie (Better Auth uses __session or better-auth.session_token)
   const sessionCookie =
-    request.cookies.get("better-auth.session_token") ||
-    request.cookies.get("__session");
+    request.cookies.get(SESSION_COOKIE) ||
+    request.cookies.get(SESSION_COOKIE_ALT);
 
   if (!sessionCookie && !pathname.startsWith("/api/auth")) {
     // Redirect to sign-in for page requests

@@ -7,12 +7,14 @@ const {
   mockFindMany,
   mockDebug,
   mockInfo,
+  mockWarn,
   mockError,
 } = vi.hoisted(() => ({
   mockCreate: vi.fn(),
   mockFindMany: vi.fn(),
   mockDebug: vi.fn(),
   mockInfo: vi.fn(),
+  mockWarn: vi.fn(),
   mockError: vi.fn(),
 }));
 
@@ -26,7 +28,7 @@ vi.mock("@/lib/prisma", () => ({
 }));
 
 vi.mock("@/lib/logger", () => ({
-  getLogger: () => ({ debug: mockDebug, info: mockInfo, error: mockError }),
+  getLogger: () => ({ debug: mockDebug, info: mockInfo, warn: mockWarn, error: mockError }),
 }));
 
 // ---------------------------------------------------------------------------
@@ -204,7 +206,7 @@ describe("audit", () => {
     });
   });
 
-  it("catch handler logs error message when Error instance is thrown", async () => {
+  it("catch handler logs warning with context when Error instance is thrown", async () => {
     let catchHandler: (err: unknown) => void;
     mockCreate.mockReturnValue({
       catch: (fn: (err: unknown) => void) => {
@@ -212,17 +214,20 @@ describe("audit", () => {
       },
     });
 
-    audit({ userId: "u4", action: "tool_call" });
+    audit({ userId: "u4", action: "tool_call", skillId: "skill-1" });
 
     // Simulate the promise rejection
     catchHandler!(new Error("DB connection failed"));
 
-    expect(mockError).toHaveBeenCalledWith("Failed to write audit log", {
+    expect(mockWarn).toHaveBeenCalledWith("Audit log write failed", {
+      action: "tool_call",
+      userId: "u4",
+      target: "skill-1",
       error: "DB connection failed",
     });
   });
 
-  it("catch handler logs stringified error for non-Error values", async () => {
+  it("catch handler logs warning with context for non-Error values", async () => {
     let catchHandler: (err: unknown) => void;
     mockCreate.mockReturnValue({
       catch: (fn: (err: unknown) => void) => {
@@ -235,7 +240,10 @@ describe("audit", () => {
     // Simulate rejection with a non-Error value
     catchHandler!("raw string error");
 
-    expect(mockError).toHaveBeenCalledWith("Failed to write audit log", {
+    expect(mockWarn).toHaveBeenCalledWith("Audit log write failed", {
+      action: "mcp_tool_call",
+      userId: "u5",
+      target: undefined,
       error: "raw string error",
     });
   });

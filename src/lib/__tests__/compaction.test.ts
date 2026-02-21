@@ -80,6 +80,55 @@ function makeMessage(id: string, role: string, content: string, source?: string)
 }
 
 // ---------------------------------------------------------------------------
+// Environment variable defaults
+// ---------------------------------------------------------------------------
+
+describe("compaction env var defaults", () => {
+  it("uses default COMPACTION_THRESHOLD of 80 when env var is not set", async () => {
+    // The module reads process.env.COMPACTION_THRESHOLD at load time.
+    // When not set, the default is 80. Verify by checking threshold behavior.
+    mockCount.mockResolvedValue(80);
+    await maybeCompact("conv-default", "user-default");
+    // At exactly 80, should NOT trigger compaction
+    expect(mockFindMany).not.toHaveBeenCalled();
+    expect(mockDebug).toHaveBeenCalledWith("checked compaction eligibility", {
+      conversationId: "conv-default",
+      messageCount: 80,
+      threshold: Number(process.env.COMPACTION_THRESHOLD ?? "80"),
+    });
+  });
+
+  it("uses default COMPACTION_KEEP_RECENT of 20 when env var is not set", async () => {
+    // Verify KEEP_RECENT defaults to 20 by checking that exactly 20 messages
+    // are kept in a compaction run (the rest are summarized).
+    const messages = Array.from({ length: 25 }, (_, i) =>
+      makeMessage(`m${i}`, "user", `msg ${i}`)
+    );
+    mockFindMany.mockResolvedValue(messages);
+    mockResolveModelFromSettings.mockResolvedValue("test-model");
+    mockGenerateText.mockResolvedValue({ text: "Summary." });
+    mockFindFirst.mockResolvedValue(null);
+    mockCreate.mockResolvedValue({});
+    mockMemoryStore.mockResolvedValue(undefined);
+    mockDeleteMany.mockResolvedValue({});
+
+    await compactConversation("conv-keep", "user-keep");
+
+    const keepRecent = Number(process.env.COMPACTION_KEEP_RECENT ?? "20");
+    expect(mockDebug).toHaveBeenCalledWith("fetched messages for compaction", {
+      conversationId: "conv-keep",
+      totalMessages: 25,
+      keepRecent,
+    });
+    // 25 - 20 = 5 messages should be deleted
+    const deletedIds = messages.slice(0, 5).map((m) => m.id);
+    expect(mockDeleteMany).toHaveBeenCalledWith({
+      where: { id: { in: deletedIds } },
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
 // maybeCompact
 // ---------------------------------------------------------------------------
 

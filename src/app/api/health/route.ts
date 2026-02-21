@@ -3,13 +3,14 @@ import { getLogger } from "@/lib/logger";
 const log = getLogger("api.health");
 
 export async function GET() {
-  const ragUrl = process.env.RAG_SERVER_URL || "http://localhost:8020";
+  const ragUrl = process.env.RAG_SERVER_URL ?? "http://localhost:8020";
+  const timeout = Number(process.env.HEALTH_CHECK_TIMEOUT ?? "3000");
 
-  log.debug("Health check started", { ragUrl });
+  log.debug("Health check started", { ragUrl, timeout });
 
   try {
     const res = await fetch(`${ragUrl}/health`, {
-      signal: AbortSignal.timeout(3000),
+      signal: AbortSignal.timeout(timeout),
     });
     const data = await res.json();
     log.debug("Health check succeeded", { data });

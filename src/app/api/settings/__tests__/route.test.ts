@@ -5,7 +5,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // (vi.mock calls are hoisted above all other code by vitest)
 // ---------------------------------------------------------------------------
 
-const { mockRequireSession, mockGetSettings, mockUpdateSettings, mockGetEffectiveAIConfig, mockLog } =
+const { mockRequireSession, mockGetSettings, mockUpdateSettings, mockGetEffectiveAIConfig, mockLog, mockHandleApiError } =
   vi.hoisted(() => ({
     mockRequireSession: vi.fn(),
     mockGetSettings: vi.fn(),
@@ -17,6 +17,12 @@ const { mockRequireSession, mockGetSettings, mockUpdateSettings, mockGetEffectiv
       warn: vi.fn(),
       error: vi.fn(),
     },
+    mockHandleApiError: vi.fn((error: unknown, context: string) => {
+      if (error instanceof Error && error.message === "Unauthorized") {
+        return Response.json({ error: "Unauthorized" }, { status: 401 });
+      }
+      return Response.json({ error: "Internal server error" }, { status: 500 });
+    }),
   }));
 
 vi.mock("@/lib/auth-server", () => ({
@@ -31,6 +37,15 @@ vi.mock("@/lib/settings", () => ({
 
 vi.mock("@/lib/logger", () => ({
   getLogger: () => mockLog,
+  maskSecret: (v: unknown) => {
+    if (typeof v !== "string" || v.length === 0) return "";
+    if (v.length <= 8) return `${"*".repeat(Math.max(0, v.length - 4))}${v.slice(-4)}`;
+    return `${"*".repeat(v.length - 4)}${v.slice(-4)}`;
+  },
+}));
+
+vi.mock("@/lib/api-utils", () => ({
+  handleApiError: (...args: unknown[]) => mockHandleApiError(...args),
 }));
 
 // ---------------------------------------------------------------------------
@@ -213,8 +228,9 @@ describe("GET /api/settings", () => {
 
     expect(res.status).toBe(401);
     expect(json).toEqual({ error: "Unauthorized" });
-    expect(mockLog.warn).toHaveBeenCalledWith(
-      "Unauthorized access attempt on GET /api/settings",
+    expect(mockHandleApiError).toHaveBeenCalledWith(
+      expect.any(Error),
+      "GET /api/settings",
     );
   });
 
@@ -226,9 +242,10 @@ describe("GET /api/settings", () => {
 
     expect(res.status).toBe(500);
     expect(json).toEqual({ error: "Internal server error" });
-    expect(mockLog.error).toHaveBeenCalledWith("Failed to fetch settings", {
-      error: expect.any(Error),
-    });
+    expect(mockHandleApiError).toHaveBeenCalledWith(
+      expect.any(Error),
+      "GET /api/settings",
+    );
   });
 
   it("returns 500 when a non-Error is thrown", async () => {
@@ -328,8 +345,9 @@ describe("PATCH /api/settings", () => {
 
     expect(res.status).toBe(401);
     expect(json).toEqual({ error: "Unauthorized" });
-    expect(mockLog.warn).toHaveBeenCalledWith(
-      "Unauthorized access attempt on PATCH /api/settings",
+    expect(mockHandleApiError).toHaveBeenCalledWith(
+      expect.any(Error),
+      "PATCH /api/settings",
     );
   });
 
@@ -343,9 +361,10 @@ describe("PATCH /api/settings", () => {
 
     expect(res.status).toBe(500);
     expect(json).toEqual({ error: "Internal server error" });
-    expect(mockLog.error).toHaveBeenCalledWith("Failed to update settings", {
-      error: expect.any(Error),
-    });
+    expect(mockHandleApiError).toHaveBeenCalledWith(
+      expect.any(Error),
+      "PATCH /api/settings",
+    );
   });
 
   it("returns 500 when a non-Error is thrown", async () => {

@@ -17,8 +17,8 @@ const log = getLogger("compaction");
  * This keeps the context window bounded while preserving knowledge.
  */
 
-const COMPACTION_THRESHOLD = 80; // messages before compaction triggers
-const KEEP_RECENT = 20; // messages to keep verbatim (most recent)
+const COMPACTION_THRESHOLD = Number(process.env.COMPACTION_THRESHOLD ?? "80"); // messages before compaction triggers
+const KEEP_RECENT = Number(process.env.COMPACTION_KEEP_RECENT ?? "20"); // messages to keep verbatim (most recent)
 
 /**
  * Check whether a conversation needs compaction and, if so, run it.

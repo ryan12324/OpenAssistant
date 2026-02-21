@@ -65,7 +65,12 @@ export function audit(entry: AuditEntry): void {
       },
     })
     .catch((err) => {
-      log.error("Failed to write audit log", { error: err instanceof Error ? err.message : String(err) });
+      log.warn("Audit log write failed", {
+        action: entry.action,
+        userId: entry.userId,
+        target: entry.skillId,
+        error: err instanceof Error ? err.message : String(err),
+      });
     });
 }
 

@@ -182,3 +182,76 @@ describe("middleware", () => {
     });
   });
 });
+
+describe("middleware with custom PUBLIC_ROUTES env", () => {
+  it("uses custom public routes from PUBLIC_ROUTES env var", async () => {
+    const origPublicRoutes = process.env.PUBLIC_ROUTES;
+    process.env.PUBLIC_ROUTES = "/login,/register,/api/auth";
+
+    vi.clearAllMocks();
+    vi.resetModules();
+
+    const { middleware: freshMiddleware } = await import("@/middleware");
+
+    // /login should be allowed as a custom public route
+    const reqLogin = makeRequest("/login");
+    freshMiddleware(reqLogin as any);
+    expect(mockNextResponseNext).toHaveBeenCalled();
+
+    vi.clearAllMocks();
+
+    // /sign-in should NOT be a public route anymore (it was replaced)
+    const reqSignIn = makeRequest("/sign-in");
+    freshMiddleware(reqSignIn as any);
+    expect(mockNextResponseRedirect).toHaveBeenCalledWith(
+      expect.objectContaining({ pathname: "/sign-in" })
+    );
+
+    if (origPublicRoutes === undefined) {
+      delete process.env.PUBLIC_ROUTES;
+    } else {
+      process.env.PUBLIC_ROUTES = origPublicRoutes;
+    }
+  });
+
+  it("uses custom session cookie names from env vars", async () => {
+    const origCookie = process.env.SESSION_COOKIE_NAME;
+    const origCookieAlt = process.env.SESSION_COOKIE_NAME_ALT;
+    process.env.SESSION_COOKIE_NAME = "my-session";
+    process.env.SESSION_COOKIE_NAME_ALT = "my-alt-session";
+
+    vi.clearAllMocks();
+    vi.resetModules();
+
+    const { middleware: freshMiddleware } = await import("@/middleware");
+
+    // Custom cookie name should be recognized
+    const req = makeRequest("/dashboard", {
+      cookies: { "my-session": "token-abc" },
+    });
+    freshMiddleware(req as any);
+    expect(mockNextResponseNext).toHaveBeenCalled();
+    expect(mockNextResponseRedirect).not.toHaveBeenCalled();
+
+    vi.clearAllMocks();
+
+    // Alt custom cookie name should also be recognized
+    const reqAlt = makeRequest("/dashboard", {
+      cookies: { "my-alt-session": "token-def" },
+    });
+    freshMiddleware(reqAlt as any);
+    expect(mockNextResponseNext).toHaveBeenCalled();
+    expect(mockNextResponseRedirect).not.toHaveBeenCalled();
+
+    if (origCookie === undefined) {
+      delete process.env.SESSION_COOKIE_NAME;
+    } else {
+      process.env.SESSION_COOKIE_NAME = origCookie;
+    }
+    if (origCookieAlt === undefined) {
+      delete process.env.SESSION_COOKIE_NAME_ALT;
+    } else {
+      process.env.SESSION_COOKIE_NAME_ALT = origCookieAlt;
+    }
+  });
+});

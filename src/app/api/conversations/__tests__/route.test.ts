@@ -1,11 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { mockRequireSession, mockPrisma, mockLog } = vi.hoisted(() => ({
+const { mockRequireSession, mockPrisma, mockLog, mockHandleApiError } = vi.hoisted(() => ({
   mockRequireSession: vi.fn(),
   mockPrisma: {
     conversation: { findMany: vi.fn(), deleteMany: vi.fn() },
   },
   mockLog: { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
+  mockHandleApiError: vi.fn((error: unknown) => {
+    if (error instanceof Error && error.message === "Unauthorized") {
+      return Response.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    return Response.json({ error: "Internal server error" }, { status: 500 });
+  }),
 }));
 
 vi.mock("@/lib/auth-server", () => ({
@@ -18,6 +24,10 @@ vi.mock("@/lib/prisma", () => ({
 
 vi.mock("@/lib/logger", () => ({
   getLogger: () => mockLog,
+}));
+
+vi.mock("@/lib/api-utils", () => ({
+  handleApiError: (...args: unknown[]) => mockHandleApiError(...args),
 }));
 
 import { GET, DELETE } from "../route";
