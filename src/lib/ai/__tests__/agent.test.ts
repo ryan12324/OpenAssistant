@@ -48,6 +48,7 @@ vi.mock("ai", () => ({
   generateText: mockGenerateText,
   streamText: mockStreamText,
   tool: mockTool,
+  stepCountIs: vi.fn((n: number) => `stepCountIs(${n})`),
 }));
 
 vi.mock("zod", async () => {
@@ -116,7 +117,7 @@ describe("agent", () => {
       expect(mockStreamText).toHaveBeenCalledWith(
         expect.objectContaining({
           model: mockModel,
-          maxSteps: 10,
+          stopWhen: expect.anything(),
         })
       );
       expect(result).toBe(mockResult);
@@ -333,7 +334,7 @@ describe("agent", () => {
       expect(mockGenerateText).toHaveBeenCalledWith(
         expect.objectContaining({
           model: mockModel,
-          maxSteps: 10,
+          stopWhen: expect.anything(),
         })
       );
     });

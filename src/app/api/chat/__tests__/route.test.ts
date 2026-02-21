@@ -10,7 +10,7 @@ const {
   mockStreamAgentResponse,
   mockMemoryManager,
   mockMaybeCompact,
-  mockConvertToCoreMessages,
+  mockConvertToModelMessages,
   mockGenerateText,
   mockResolveModelFromSettings,
   mockLog,
@@ -24,7 +24,7 @@ const {
   mockStreamAgentResponse: vi.fn(),
   mockMemoryManager: { recall: vi.fn(), store: vi.fn() },
   mockMaybeCompact: vi.fn(),
-  mockConvertToCoreMessages: vi.fn(),
+  mockConvertToModelMessages: vi.fn(),
   mockGenerateText: vi.fn(),
   mockResolveModelFromSettings: vi.fn(),
   mockLog: { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -57,7 +57,7 @@ vi.mock("@/lib/compaction", () => ({
 }));
 
 vi.mock("ai", () => ({
-  convertToCoreMessages: (...args: unknown[]) => mockConvertToCoreMessages(...args),
+  convertToModelMessages: (...args: unknown[]) => mockConvertToModelMessages(...args),
   generateText: (...args: unknown[]) => mockGenerateText(...args),
 }));
 
@@ -101,7 +101,7 @@ function makeStreamResult(textValue: string) {
   return {
     result: {
       text: textPromise,
-      toDataStreamResponse: vi.fn(({ headers }: { headers: Record<string, string> }) =>
+      toUIMessageStreamResponse: vi.fn(({ headers }: { headers: Record<string, string> }) =>
         new Response("stream-body", { headers })
       ),
     },
@@ -115,7 +115,7 @@ function makeStreamResult(textValue: string) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockConvertToCoreMessages.mockReturnValue([{ role: "user", content: "hi" }]);
+  mockConvertToModelMessages.mockReturnValue([{ role: "user", content: "hi" }]);
   mockMemoryManager.recall.mockResolvedValue("memory context");
   mockMemoryManager.store.mockResolvedValue(undefined);
   mockMaybeCompact.mockResolvedValue(undefined);
@@ -127,7 +127,7 @@ describe("POST /api/chat", () => {
   it("returns 401 when requireSession throws Unauthorized", async () => {
     mockRequireSession.mockRejectedValue(new Error("Unauthorized"));
 
-    const req = makeRequest({ messages: [{ role: "user", content: "hello" }] });
+    const req = makeRequest({ messages: [{ role: "user", parts: [{ type: "text", text: "hello" }] }] });
     const res = await POST(req as any);
     const json = await res.json();
 
@@ -166,7 +166,7 @@ describe("POST /api/chat", () => {
     mockStreamAgentResponse.mockResolvedValue(result);
 
     const req = makeRequest({
-      messages: [{ role: "user", content: "Hello world" }],
+      messages: [{ role: "user", parts: [{ type: "text", text: "Hello world" }] }],
     });
     const res = await POST(req as any);
 
@@ -197,7 +197,7 @@ describe("POST /api/chat", () => {
     mockStreamAgentResponse.mockResolvedValue(result);
 
     const req = makeRequest({
-      messages: [{ role: "user", content: "follow up" }],
+      messages: [{ role: "user", parts: [{ type: "text", text: "follow up" }] }],
       conversationId: "conv-existing",
     });
     const res = await POST(req as any);
@@ -221,7 +221,7 @@ describe("POST /api/chat", () => {
     mockStreamAgentResponse.mockResolvedValue(result);
 
     const req = makeRequest({
-      messages: [{ role: "user", content: "" }],
+      messages: [{ role: "user", parts: [{ type: "text", text: "" }] }],
     });
     await POST(req as any);
 
@@ -244,7 +244,7 @@ describe("POST /api/chat", () => {
     mockStreamAgentResponse.mockResolvedValue(result);
 
     const req = makeRequest({
-      messages: [{ role: "assistant", content: "I said something" }],
+      messages: [{ role: "assistant", parts: [{ type: "text", text: "I said something" }] }],
     });
     const res = await POST(req as any);
 
@@ -265,7 +265,7 @@ describe("POST /api/chat", () => {
     mockStreamAgentResponse.mockResolvedValue(result);
 
     const req = makeRequest({
-      messages: [{ role: "user", content: "hello" }],
+      messages: [{ role: "user", parts: [{ type: "text", text: "hello" }] }],
     });
     const res = await POST(req as any);
 
@@ -286,7 +286,7 @@ describe("POST /api/chat", () => {
     mockStreamAgentResponse.mockResolvedValue(result);
 
     const req = makeRequest({
-      messages: [{ role: "user", content: "hello" }],
+      messages: [{ role: "user", parts: [{ type: "text", text: "hello" }] }],
     });
     const res = await POST(req as any);
 
@@ -309,7 +309,7 @@ describe("POST /api/chat", () => {
     mockStreamAgentResponse.mockResolvedValue(result);
 
     const req = makeRequest({
-      messages: [{ role: "user", content: "hello" }],
+      messages: [{ role: "user", parts: [{ type: "text", text: "hello" }] }],
       conversationId: "conv-1",
     });
     const res = await POST(req as any);
@@ -332,7 +332,7 @@ describe("POST /api/chat", () => {
     mockStreamAgentResponse.mockResolvedValue(result);
 
     const req = makeRequest({
-      messages: [{ role: "user", content: "hello" }],
+      messages: [{ role: "user", parts: [{ type: "text", text: "hello" }] }],
       conversationId: "conv-1",
     });
     await POST(req as any);
@@ -354,7 +354,7 @@ describe("POST /api/chat", () => {
     mockStreamAgentResponse.mockResolvedValue(result);
 
     const req = makeRequest({
-      messages: [{ role: "user", content: "hello" }],
+      messages: [{ role: "user", parts: [{ type: "text", text: "hello" }] }],
       conversationId: "conv-1",
     });
     await POST(req as any);
@@ -374,7 +374,7 @@ describe("POST /api/chat", () => {
     mockStreamAgentResponse.mockResolvedValue(result);
 
     const req = makeRequest({
-      messages: [{ role: "user", content: "hello" }],
+      messages: [{ role: "user", parts: [{ type: "text", text: "hello" }] }],
       conversationId: "conv-1",
     });
     await POST(req as any);
@@ -397,7 +397,7 @@ describe("POST /api/chat", () => {
     mockStreamAgentResponse.mockResolvedValue(result);
 
     const req = makeRequest({
-      messages: [{ role: "user", content: "hello" }],
+      messages: [{ role: "user", parts: [{ type: "text", text: "hello" }] }],
     });
     await POST(req as any);
 
@@ -417,7 +417,7 @@ describe("POST /api/chat", () => {
     mockStreamAgentResponse.mockResolvedValue(result);
 
     const req = makeRequest({
-      messages: [{ role: "user", content: "hello" }],
+      messages: [{ role: "user", parts: [{ type: "text", text: "hello" }] }],
     });
     await POST(req as any);
 
@@ -439,7 +439,7 @@ describe("POST /api/chat", () => {
     mockStreamAgentResponse.mockResolvedValue(result);
 
     const req = makeRequest({
-      messages: [{ role: "user", content: "hello" }],
+      messages: [{ role: "user", parts: [{ type: "text", text: "hello" }] }],
     });
     await POST(req as any);
 
@@ -458,7 +458,7 @@ describe("POST /api/chat", () => {
     mockStreamAgentResponse.mockResolvedValue(result);
 
     const req = makeRequest({
-      messages: [{ role: "user", content: "hello" }],
+      messages: [{ role: "user", parts: [{ type: "text", text: "hello" }] }],
       conversationId: "conv-1",
     });
     await POST(req as any);
@@ -478,7 +478,7 @@ describe("POST /api/chat", () => {
     mockStreamAgentResponse.mockResolvedValue(result);
 
     const req = makeRequest({
-      messages: [{ role: "user", content: "hello" }],
+      messages: [{ role: "user", parts: [{ type: "text", text: "hello" }] }],
       conversationId: "conv-1",
     });
     await POST(req as any);
@@ -499,7 +499,7 @@ describe("POST /api/chat", () => {
     mockStreamAgentResponse.mockResolvedValue(result);
 
     const req = makeRequest({
-      messages: [{ role: "user", content: "hello" }],
+      messages: [{ role: "user", parts: [{ type: "text", text: "hello" }] }],
       conversationId: "conv-1",
     });
     await POST(req as any);
@@ -516,7 +516,7 @@ describe("POST /api/chat", () => {
   it("returns 500 for generic errors", async () => {
     mockRequireSession.mockRejectedValue(new Error("DB connection failed"));
 
-    const req = makeRequest({ messages: [{ role: "user", content: "hello" }] });
+    const req = makeRequest({ messages: [{ role: "user", parts: [{ type: "text", text: "hello" }] }] });
     const res = await POST(req as any);
     const json = await res.json();
 
@@ -550,7 +550,7 @@ describe("POST /api/chat", () => {
     mockStreamAgentResponse.mockResolvedValue(result);
 
     const req = makeRequest({
-      messages: [{ role: "user", content: longContent }],
+      messages: [{ role: "user", parts: [{ type: "text", text: longContent }] }],
     });
     await POST(req as any);
 
@@ -574,7 +574,7 @@ describe("POST /api/chat", () => {
     mockStreamAgentResponse.mockResolvedValue(result);
 
     const req = makeRequest({
-      messages: [{ role: "user", content: "hello" }],
+      messages: [{ role: "user", parts: [{ type: "text", text: "hello" }] }],
       conversationId: "conv-1",
     });
     await POST(req as any);
@@ -598,14 +598,14 @@ describe("POST /api/chat", () => {
     });
     const result = {
       text: textPromise,
-      toDataStreamResponse: vi.fn(({ headers }: { headers: Record<string, string> }) =>
+      toUIMessageStreamResponse: vi.fn(({ headers }: { headers: Record<string, string> }) =>
         new Response("stream-body", { headers })
       ),
     };
     mockStreamAgentResponse.mockResolvedValue(result);
 
     const req = makeRequest({
-      messages: [{ role: "user", content: "hello" }],
+      messages: [{ role: "user", parts: [{ type: "text", text: "hello" }] }],
       conversationId: "conv-1",
     });
     await POST(req as any);
@@ -627,7 +627,7 @@ describe("POST /api/chat", () => {
     mockPrisma.conversation.create.mockRejectedValue("non-error-string");
 
     const req = makeRequest({
-      messages: [{ role: "user", content: "hello" }],
+      messages: [{ role: "user", parts: [{ type: "text", text: "hello" }] }],
     });
     const res = await POST(req as any);
     const json = await res.json();
@@ -647,7 +647,7 @@ describe("POST /api/chat", () => {
 
     const req = makeRequest({
       messages: [
-        { role: "user", content: "" },
+        { role: "user", parts: [{ type: "text", text: "" }] },
       ],
     });
     await POST(req as any);
@@ -671,14 +671,14 @@ describe("POST /api/chat", () => {
     const textPromise = Promise.reject(new Error("stream exploded"));
     const result = {
       text: textPromise,
-      toDataStreamResponse: vi.fn(({ headers }: { headers: Record<string, string> }) =>
+      toUIMessageStreamResponse: vi.fn(({ headers }: { headers: Record<string, string> }) =>
         new Response("stream-body", { headers })
       ),
     };
     mockStreamAgentResponse.mockResolvedValue(result);
 
     const req = makeRequest({
-      messages: [{ role: "user", content: "hello" }],
+      messages: [{ role: "user", parts: [{ type: "text", text: "hello" }] }],
       conversationId: "conv-1",
     });
     const res = await POST(req as any);

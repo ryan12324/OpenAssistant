@@ -30,7 +30,7 @@ export default async function ConversationPage({
   const messages = conversation.messages.map((m) => ({
     id: m.id,
     role: m.role as "user" | "assistant",
-    content: m.content,
+    parts: [{ type: "text" as const, text: m.content }],
   }));
 
   return (

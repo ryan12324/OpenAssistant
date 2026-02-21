@@ -467,7 +467,7 @@ Original task: ${task}`,
             content: `Task: ${task}\n\nAgent outputs:\n\n${agentOutputs}`,
           },
         ],
-        maxTokens: 4096,
+        maxOutputTokens: 4096,
       });
 
       log.info("Team synthesis LLM call completed", { teamId: this.definition.id, durationMs: Date.now() - start, outputLength: result.text.length });

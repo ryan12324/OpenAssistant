@@ -111,7 +111,6 @@ describe("resolveModel", () => {
     expect(createOpenAI).toHaveBeenCalledWith({
       baseURL: "https://custom.example.com/v1",
       apiKey: "sk-test",
-      compatibility: "compatible",
     });
     expect(mockClientFactory).toHaveBeenCalledWith("gpt-4o");
     expect(result).toBe(mockModelInstance);

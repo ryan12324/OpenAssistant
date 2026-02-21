@@ -33,6 +33,7 @@ vi.mock("ai", () => ({
   generateText: mocks.mockGenerateText,
   streamText: mocks.mockStreamText,
   tool: mocks.mockTool,
+  stepCountIs: vi.fn((n: number) => `stepCountIs(${n})`),
 }));
 
 vi.mock("@/lib/ai/providers", () => ({

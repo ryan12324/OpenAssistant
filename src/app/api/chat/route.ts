@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { convertToCoreMessages, generateText } from "ai";
+import { convertToModelMessages, generateText, type UIMessage } from "ai";
 import { requireSession } from "@/lib/auth-server";
 import { prisma } from "@/lib/prisma";
 import { streamAgentResponse } from "@/lib/ai/agent";
@@ -11,9 +11,12 @@ import { handleApiError } from "@/lib/api-utils";
 
 const log = getLogger("api.chat");
 
-interface UserMessage {
-  role: "system" | "user" | "assistant" | "data";
-  content: string;
+/** Extract text content from a UIMessage (v6 uses parts, not content). */
+function getTextContent(msg: UIMessage): string {
+  for (const part of msg.parts) {
+    if (part.type === "text") return (part as { type: "text"; text: string }).text;
+  }
+  return "";
 }
 
 export async function POST(req: NextRequest) {
@@ -29,7 +32,7 @@ export async function POST(req: NextRequest) {
       messages,
       conversationId,
     }: {
-      messages: UserMessage[];
+      messages: UIMessage[];
       conversationId?: string;
     } = body;
 
@@ -47,7 +50,7 @@ export async function POST(req: NextRequest) {
     let convId = conversationId;
     const isNewConversation = !convId;
     if (!convId) {
-      const firstContent = messages[0]?.content ?? "";
+      const firstContent = messages[0] ? getTextContent(messages[0]) : "";
       const conversation = await prisma.conversation.create({
         data: {
           userId,
@@ -68,7 +71,7 @@ export async function POST(req: NextRequest) {
         data: {
           conversationId: resolvedConvId,
           role: "user",
-          content: lastMessage.content,
+          content: getTextContent(lastMessage),
           source: "web",
         },
       });
@@ -80,8 +83,8 @@ export async function POST(req: NextRequest) {
     try {
       log.debug("Attempting memory recall", { userId });
       const userQuery = messages
-        .filter((m: { role: string }) => m.role === "user")
-        .map((m: { content: string }) => m.content)
+        .filter((m) => m.role === "user")
+        .map((m) => getTextContent(m))
         .slice(-3)
         .join(" ");
       memoryContext = await memoryManager.recall({
@@ -98,7 +101,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Convert UI messages from useChat to core messages for the AI SDK
-    const coreMessages = convertToCoreMessages(messages);
+    const coreMessages = await convertToModelMessages(messages);
     log.debug("Core messages converted", { coreMessageCount: coreMessages.length });
 
     // Stream the AI response
@@ -116,7 +119,7 @@ export async function POST(req: NextRequest) {
     });
 
     // Save assistant response after stream completes (non-blocking)
-    result.text.then(async (text) => {
+    Promise.resolve(result.text).then(async (text) => {
       const streamDuration = Date.now() - startTime;
       log.info("AI stream complete", {
         responseLength: text?.length ?? 0,
@@ -144,7 +147,7 @@ export async function POST(req: NextRequest) {
 
         // Auto-save short-term memory of the interaction
         try {
-          const userContent = lastMessage?.content ?? "";
+          const userContent = lastMessage ? getTextContent(lastMessage) : "";
           await memoryManager.store({
             userId,
             content: `User asked: "${userContent.slice(0, 200)}"\nAssistant responded about: ${text.slice(0, 200)}`,
@@ -163,9 +166,7 @@ export async function POST(req: NextRequest) {
         if (isNewConversation) {
           try {
             log.debug("Generating title for new conversation", { conversationId: resolvedConvId });
-            const userContent = typeof lastMessage?.content === "string"
-              ? lastMessage.content
-              : "";
+            const userContent = lastMessage ? getTextContent(lastMessage) : "";
             const titleResult = await generateText({
               model: await resolveModelFromSettings(),
               messages: [
@@ -212,7 +213,7 @@ export async function POST(req: NextRequest) {
 
     log.info("Returning stream response", { conversationId: resolvedConvId, userId });
 
-    return result.toDataStreamResponse({
+    return result.toUIMessageStreamResponse({
       headers: {
         "X-Conversation-Id": resolvedConvId,
       },

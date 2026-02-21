@@ -36,6 +36,7 @@ vi.mock("ai", () => ({
   generateText: mocks.mockGenerateText,
   streamText: mocks.mockStreamText,
   tool: mocks.mockTool,
+  stepCountIs: vi.fn((n: number) => `stepCountIs(${n})`),
 }));
 
 vi.mock("@/lib/ai/providers", () => ({
@@ -124,7 +125,7 @@ describe("AgentNode", () => {
       await node.run(baseRunParams);
 
       const callArgs = mocks.mockGenerateText.mock.calls[0][0];
-      expect(callArgs.maxTokens).toBe(512);
+      expect(callArgs.maxOutputTokens).toBe(512);
       expect(callArgs.temperature).toBe(0.7);
     });
   });

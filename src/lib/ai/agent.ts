@@ -1,4 +1,4 @@
-import { generateText, streamText, tool, type CoreMessage } from "ai";
+import { generateText, streamText, tool, stepCountIs, type ModelMessage } from "ai";
 import { z } from "zod";
 import { skillRegistry } from "@/lib/skills/registry";
 import { memoryManager } from "@/lib/rag/memory";
@@ -81,7 +81,7 @@ function buildTools(context: SkillContext) {
 
     tools[skill.id] = tool({
       description: skill.description,
-      parameters: z.object(shape),
+      inputSchema: z.object(shape),
       execute: async (args) => {
         log.info("executing built-in skill", { skillId: skill.id, userId: context.userId });
         const startMs = Date.now();
@@ -141,7 +141,7 @@ function buildTools(context: SkillContext) {
 
       tools[integrationSkill.id] = tool({
         description: `[${instance.definition.name}] ${integrationSkill.description}`,
-        parameters: z.object(shape),
+        inputSchema: z.object(shape),
         execute: async (args) => {
           log.info("executing integration tool", {
             toolId: integrationSkill.id,
@@ -227,7 +227,7 @@ function buildTools(context: SkillContext) {
 
     tools[toolId] = tool({
       description: desc,
-      parameters: z.object(shape),
+      inputSchema: z.object(shape),
       execute: async (args) => {
         log.info("executing MCP tool", {
           toolId,
@@ -308,7 +308,7 @@ function buildTools(context: SkillContext) {
  * Run the AI agent with streaming for a chat message.
  */
 export async function streamAgentResponse(params: {
-  messages: CoreMessage[];
+  messages: ModelMessage[];
   userId: string;
   conversationId: string;
   memoryContext?: string;
@@ -337,14 +337,14 @@ export async function streamAgentResponse(params: {
   log.info("starting stream", {
     userId: params.userId,
     conversationId: params.conversationId,
-    model: String(model.modelId ?? model),
+    model: String(model),
   });
 
   return streamText({
     model,
     messages: allMessages,
     tools: buildTools(context),
-    maxSteps: 10,
+    stopWhen: stepCountIs(10),
   });
 }
 
@@ -352,7 +352,7 @@ export async function streamAgentResponse(params: {
  * Generate a one-shot response (non-streaming).
  */
 export async function generateAgentResponse(params: {
-  messages: CoreMessage[];
+  messages: ModelMessage[];
   userId: string;
   conversationId: string;
   memoryContext?: string;
@@ -382,7 +382,7 @@ export async function generateAgentResponse(params: {
     model: await resolveModelFromSettings(),
     messages: allMessages,
     tools: buildTools(context),
-    maxSteps: 10,
+    stopWhen: stepCountIs(10),
   });
   const generateDurationMs = Date.now() - generateStartMs;
 

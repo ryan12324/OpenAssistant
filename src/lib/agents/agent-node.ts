@@ -1,4 +1,4 @@
-import { generateText, streamText, tool } from "ai";
+import { generateText, streamText, tool, stepCountIs } from "ai";
 import { z } from "zod";
 import { skillRegistry } from "@/lib/skills/registry";
 import { integrationRegistry } from "@/lib/integrations";
@@ -52,7 +52,7 @@ export class AgentNode {
     const model = await resolveModelFromSettings();
     log.info("LLM request starting", {
       ...agentCtx,
-      model: String(model.modelId ?? model),
+      model: String(typeof model === "string" ? model : model),
       messageCount: messages.length,
       maxTokens: this.persona.maxTokens,
       temperature: this.persona.temperature,
@@ -63,8 +63,8 @@ export class AgentNode {
         model,
         messages,
         tools: this.buildTools(ctx),
-        maxSteps: 8,
-        maxTokens: this.persona.maxTokens,
+        stopWhen: stepCountIs(8),
+        maxOutputTokens: this.persona.maxTokens,
         temperature: this.persona.temperature,
       });
 
@@ -125,7 +125,7 @@ export class AgentNode {
       const streamModel = await resolveModelFromSettings();
       log.info("LLM stream request starting", {
         ...agentCtx,
-        model: String(streamModel.modelId ?? streamModel),
+        model: String(typeof streamModel === "string" ? streamModel : streamModel),
         messageCount: messages.length,
       });
 
@@ -133,8 +133,8 @@ export class AgentNode {
         model: streamModel,
         messages,
         tools: this.buildTools(ctx),
-        maxSteps: 8,
-        maxTokens: this.persona.maxTokens,
+        stopWhen: stepCountIs(8),
+        maxOutputTokens: this.persona.maxTokens,
         temperature: this.persona.temperature,
       });
 
@@ -245,7 +245,7 @@ export class AgentNode {
 
       tools[skill.id] = tool({
         description: skill.description,
-        parameters: z.object(shape),
+        inputSchema: z.object(shape),
         execute: async (args) => skill.execute(args as Record<string, unknown>, context),
       });
     }
@@ -265,7 +265,7 @@ export class AgentNode {
 
         tools[integrationSkill.id] = tool({
           description: `[${instance.definition.name}] ${integrationSkill.description}`,
-          parameters: z.object(shape),
+          inputSchema: z.object(shape),
           execute: async (args) =>
             instance.executeSkill(integrationSkill.id, args as Record<string, unknown>),
         });
@@ -276,7 +276,7 @@ export class AgentNode {
     tools["handoff"] = tool({
       description:
         "Hand off the current task to another agent on your team. Use when the task is outside your expertise.",
-      parameters: z.object({
+      inputSchema: z.object({
         target_agent: z.string().describe("ID or name of the agent to hand off to"),
         reason: z.string().describe("Why you're handing off"),
         context: z.string().describe("Summary of what you've done so far"),

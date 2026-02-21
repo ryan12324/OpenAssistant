@@ -1,4 +1,4 @@
-import type { AppSettings } from "@prisma/client";
+import type { AppSettings } from "@/generated/prisma/client";
 
 // ---------------------------------------------------------------------------
 // Mocks — vi.hoisted ensures these are available when vi.mock factories run

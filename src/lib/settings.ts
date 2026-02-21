@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import type { AppSettings } from "@prisma/client";
+import type { AppSettings } from "@/generated/prisma/client";
 import { getLogger, maskSecret } from "@/lib/logger";
 
 const log = getLogger("settings");

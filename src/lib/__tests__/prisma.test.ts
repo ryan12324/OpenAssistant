@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { mockLog, MockPrismaClient } = vi.hoisted(() => {
+const { mockLog, MockPrismaClient, MockAdapter } = vi.hoisted(() => {
   const mockLog = {
     debug: vi.fn(),
     info: vi.fn(),
@@ -8,16 +8,25 @@ const { mockLog, MockPrismaClient } = vi.hoisted(() => {
     error: vi.fn(),
     child: vi.fn(),
   };
-  class MockPrismaClient {}
-  return { mockLog, MockPrismaClient };
+  class MockPrismaClient {
+    constructor(_opts?: unknown) {}
+  }
+  class MockAdapter {
+    constructor(_opts?: unknown) {}
+  }
+  return { mockLog, MockPrismaClient, MockAdapter };
 });
 
 vi.mock("@/lib/logger", () => ({
   getLogger: vi.fn(() => mockLog),
 }));
 
-vi.mock("@prisma/client", () => ({
+vi.mock("@/generated/prisma/client", () => ({
   PrismaClient: MockPrismaClient,
+}));
+
+vi.mock("@prisma/adapter-better-sqlite3", () => ({
+  PrismaBetterSqlite3: MockAdapter,
 }));
 
 describe("prisma", () => {

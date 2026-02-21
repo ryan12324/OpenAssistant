@@ -28,7 +28,7 @@ export function buildZodSchemaFromParams(
         schema = z.array(z.unknown()).describe(param.description);
         break;
       case "object":
-        schema = z.record(z.unknown()).describe(param.description);
+        schema = z.record(z.string(), z.unknown()).describe(param.description);
         break;
       default:
         schema = z.string().describe(param.description);
@@ -61,7 +61,7 @@ export function buildZodSchemaFromJsonSchema(
         schema = z.array(z.unknown());
         break;
       case "object":
-        schema = z.record(z.unknown());
+        schema = z.record(z.string(), z.unknown());
         break;
       default:
         schema = z.string();
