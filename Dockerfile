@@ -9,8 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 FROM base AS deps
 WORKDIR /app
 COPY package.json package-lock.json* ./
-ENV DATABASE_URL="file:./placeholder.db"
-RUN npm ci --ignore-scripts && npx prisma generate
+RUN npm ci --ignore-scripts
 
 # ─── Build ───────────────────────────────────────────────────
 FROM base AS builder
