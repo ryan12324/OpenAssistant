@@ -161,22 +161,6 @@ export function resolveModel(config: ModelConfig): LanguageModelV1 {
 }
 
 /**
- * Resolve a model from a simple string like "gpt-4o" or "anthropic/claude-sonnet-4-5-20250929".
- * Falls back to env vars AI_PROVIDER / AI_MODEL / OPENAI_API_KEY.
- */
-export function resolveModelFromString(modelStr?: string): LanguageModelV1 {
-  if (modelStr) {
-    const { provider, model } = parseModelString(modelStr);
-    return resolveModel({ provider, model });
-  }
-
-  // Fall back to environment-configured defaults
-  const envProvider = (process.env.AI_PROVIDER || "openai") as AIProvider;
-  const envModel = process.env.AI_MODEL || PROVIDER_DEFAULTS[envProvider]?.defaultModel || "gpt-4o";
-  return resolveModel({ provider: envProvider, model: envModel });
-}
-
-/**
  * Resolve a model using DB-stored settings (with env fallback).
  * This is the primary entry point — use this in all server-side code.
  */
