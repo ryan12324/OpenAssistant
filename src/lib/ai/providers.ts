@@ -121,23 +121,6 @@ const PROVIDER_DEFAULTS: Record<
 };
 
 /**
- * Resolve a model string like "openai/gpt-4o" or "anthropic/claude-sonnet-4-5-20250929"
- * into a provider and model name.
- */
-export function parseModelString(modelStr: string): { provider: AIProvider; model: string } {
-  const slash = modelStr.indexOf("/");
-  if (slash > 0) {
-    const provider = modelStr.slice(0, slash) as AIProvider;
-    const model = modelStr.slice(slash + 1);
-    if (provider in PROVIDER_DEFAULTS) {
-      return { provider, model };
-    }
-  }
-  // Default to OpenAI if no provider prefix
-  return { provider: "openai", model: modelStr };
-}
-
-/**
  * Create a Vercel AI SDK LanguageModel from a ModelConfig.
  * All providers are accessed through OpenAI-compatible endpoints using createOpenAI.
  */
@@ -171,14 +154,9 @@ export async function resolveModelFromSettings(): Promise<LanguageModelV1> {
   const modelStr = config.model || "";
 
   if (modelStr) {
-    const parsed = parseModelString(modelStr);
-    // If the model string has an explicit provider prefix (e.g. "anthropic/claude-...")
-    // use that; otherwise honour the provider stored in the DB/env config.
-    const hasPrefix = modelStr.includes("/");
-    const provider = hasPrefix ? parsed.provider : configProvider;
     return resolveModel({
-      provider,
-      model: parsed.model,
+      provider: configProvider,
+      model: modelStr,
       apiKey: config.apiKey,
       baseUrl: config.baseUrl || undefined,
     });
