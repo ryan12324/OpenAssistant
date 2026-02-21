@@ -27,6 +27,7 @@ model User {
   memories      Memory[]
   skillConfigs  SkillConfig[]
   auditLogs     AuditLog[]
+  mcpServers    McpServer[]
 }
 
 model Session {
@@ -210,4 +211,28 @@ model AuditLog {
 
   @@index([userId, createdAt])
   @@index([action, createdAt])
+}
+
+// ─── MCP Server Configuration ───────────────────────────────
+
+/// Per-user MCP server configurations. Each row represents an external
+/// MCP server that the user has configured (via the UI or API).
+/// Global servers from the config file are NOT stored here.
+model McpServer {
+  id        String   @id @default(cuid())
+  name      String
+  transport String   // "stdio" | "http"
+  command   String?  // stdio: command to spawn (e.g. "npx")
+  args      String?  // JSON array of command arguments
+  env       String?  // JSON object of environment variables
+  url       String?  // http: server URL
+  headers   String?  // JSON object of HTTP headers
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, name])
 }

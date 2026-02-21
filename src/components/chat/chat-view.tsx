@@ -3,11 +3,13 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { ChatInput } from "./chat-input";
 import { ChatMessage } from "./chat-message";
+import type { ToolCall } from "./chat-message";
 
 interface Message {
   id: string;
   role: "user" | "assistant";
   content: string;
+  toolCalls?: ToolCall[];
 }
 
 interface ChatViewProps {
@@ -324,41 +326,125 @@ export function ChatView({ conversationId, initialMessages }: ChatViewProps) {
         window.history.replaceState(null, "", `/chat/${convId}`);
       }
 
-      // Stream the response
+      // Stream the response — parse the full Vercel AI SDK data stream protocol
       const reader = res.body?.getReader();
       const decoder = new TextDecoder();
       let fullContent = "";
+      const toolCalls = new Map<string, ToolCall>();
 
       if (reader) {
+        let buffer = "";
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
 
-          const chunk = decoder.decode(value, { stream: true });
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          // Keep the last potentially incomplete line in the buffer
+          buffer = lines.pop() || "";
 
-          // Parse the Vercel AI SDK data stream format
-          const lines = chunk.split("\n");
           for (const line of lines) {
-            // Text delta format: 0:"text"
-            if (line.startsWith("0:")) {
-              try {
+            if (!line) continue;
+
+            try {
+              // 0: text delta
+              if (line.startsWith("0:")) {
                 const text = JSON.parse(line.slice(2));
                 fullContent += text;
                 setMessages((prev) =>
                   prev.map((m) =>
-                    m.id === assistantId ? { ...m, content: fullContent } : m
+                    m.id === assistantId
+                      ? { ...m, content: fullContent, toolCalls: [...toolCalls.values()] }
+                      : m
                   )
                 );
-              } catch {
-                // Skip malformed chunks
               }
+              // 9: tool call begin — {"toolCallId":"...","toolName":"..."}
+              else if (line.startsWith("9:")) {
+                const data = JSON.parse(line.slice(2));
+                toolCalls.set(data.toolCallId, {
+                  id: data.toolCallId,
+                  name: data.toolName,
+                  state: "calling",
+                  args: "",
+                });
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === assistantId
+                      ? { ...m, toolCalls: [...toolCalls.values()] }
+                      : m
+                  )
+                );
+              }
+              // b: tool call delta (streaming args)
+              else if (line.startsWith("b:")) {
+                const data = JSON.parse(line.slice(2));
+                const tc = toolCalls.get(data.toolCallId);
+                if (tc) {
+                  tc.args = (tc.args || "") + (data.argsTextDelta || "");
+                }
+              }
+              // a: tool result — {"toolCallId":"...","result":"..."}
+              else if (line.startsWith("a:")) {
+                const data = JSON.parse(line.slice(2));
+                const tc = toolCalls.get(data.toolCallId);
+                if (tc) {
+                  tc.state = "result";
+                  tc.result = typeof data.result === "string"
+                    ? data.result
+                    : JSON.stringify(data.result);
+                } else {
+                  toolCalls.set(data.toolCallId, {
+                    id: data.toolCallId,
+                    name: "tool",
+                    state: "result",
+                    result: typeof data.result === "string"
+                      ? data.result
+                      : JSON.stringify(data.result),
+                  });
+                }
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === assistantId
+                      ? { ...m, toolCalls: [...toolCalls.values()] }
+                      : m
+                  )
+                );
+              }
+              // e: finish with metadata (step boundary)
+              // d: error
+              else if (line.startsWith("d:")) {
+                const data = JSON.parse(line.slice(2));
+                if (!fullContent) {
+                  fullContent = typeof data === "string" ? data : (data.message || "An error occurred.");
+                  setMessages((prev) =>
+                    prev.map((m) =>
+                      m.id === assistantId
+                        ? { ...m, content: fullContent, toolCalls: [...toolCalls.values()] }
+                        : m
+                    )
+                  );
+                }
+              }
+              // Other prefixes (e:, c:, etc.) — skip silently
+            } catch {
+              // Skip malformed lines
             }
           }
         }
       }
 
-      // If no content was streamed, show a fallback
-      if (!fullContent) {
+      // If no text was streamed but tool calls happened, show a summary
+      if (!fullContent && toolCalls.size > 0) {
+        fullContent = "Done.";
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantId
+              ? { ...m, content: fullContent, toolCalls: [...toolCalls.values()] }
+              : m
+          )
+        );
+      } else if (!fullContent) {
         setMessages((prev) =>
           prev.map((m) =>
             m.id === assistantId
@@ -428,11 +514,13 @@ export function ChatView({ conversationId, initialMessages }: ChatViewProps) {
                 key={msg.id}
                 role={msg.role}
                 content={msg.content}
+                toolCalls={msg.toolCalls}
               />
             ))}
             {isLoading &&
               messages[messages.length - 1]?.role === "assistant" &&
-              !messages[messages.length - 1]?.content && (
+              !messages[messages.length - 1]?.content &&
+              !(messages[messages.length - 1]?.toolCalls?.length) && (
                 <div className="flex gap-4 px-4 py-4">
                   <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-primary text-xs font-bold text-primary-foreground">
                     OA

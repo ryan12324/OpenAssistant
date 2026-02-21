@@ -17,7 +17,8 @@ export type AuditAction =
   | "memory_recall"
   | "inbound_message"
   | "outbound_reply"
-  | "agent_spawn";
+  | "agent_spawn"
+  | "mcp_tool_call";
 
 export interface AuditEntry {
   userId: string;

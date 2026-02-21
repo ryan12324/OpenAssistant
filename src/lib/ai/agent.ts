@@ -5,6 +5,8 @@ import { memoryManager } from "@/lib/rag/memory";
 import { integrationRegistry } from "@/lib/integrations";
 import { resolveModelFromSettings } from "@/lib/ai/providers";
 import { audit } from "@/lib/audit";
+import { mcpManager } from "@/lib/mcp/client";
+import { getToolApprovalRequirement } from "@/lib/mcp/permissions";
 import type { SkillContext, SkillResult } from "@/lib/skills/types";
 
 const SYSTEM_PROMPT = `You are OpenAssistant, a personal AI assistant with persistent memory and extensible skills.
@@ -30,7 +32,9 @@ Guidelines:
 - Use web_search when you need current information.
 - Be transparent about what you remember and what you don't.
 - You may use multiple tools in sequence to accomplish complex tasks.
-- When using integrations (Telegram, Spotify, Hue, etc.), call the appropriate tool directly.`;
+- When using integrations (Telegram, Spotify, Hue, etc.), call the appropriate tool directly.
+
+7. **Use MCP tools**: You have access to tools from connected MCP servers (external services). These tools are prefixed with "mcp_" in their names. Use them when relevant to the user's request.`;
 
 /**
  * Build Zod schemas dynamically from skill parameters for the Vercel AI SDK.
@@ -148,6 +152,100 @@ function buildTools(context: SkillContext) {
     }
   }
 
+  // Register tools from connected MCP servers
+  const mcpTools = mcpManager.getToolsForUser(context.userId);
+  for (const mcpTool of mcpTools) {
+    const toolId = `mcp_${mcpTool.serverId}_${mcpTool.name}`.replace(/[^a-zA-Z0-9_]/g, "_");
+
+    // Convert JSON Schema to Zod schema
+    const shape: Record<string, z.ZodTypeAny> = {};
+    const props = (mcpTool.inputSchema?.properties || {}) as Record<
+      string,
+      { type?: string; description?: string }
+    >;
+    const required = (mcpTool.inputSchema?.required || []) as string[];
+
+    for (const [propName, propDef] of Object.entries(props)) {
+      let schema: z.ZodTypeAny;
+      switch (propDef.type) {
+        case "number":
+        case "integer":
+          schema = z.number();
+          break;
+        case "boolean":
+          schema = z.boolean();
+          break;
+        case "array":
+          schema = z.array(z.unknown());
+          break;
+        case "object":
+          schema = z.record(z.unknown());
+          break;
+        default:
+          schema = z.string();
+      }
+      if (propDef.description) schema = schema.describe(propDef.description);
+      shape[propName] = required.includes(propName) ? schema : schema.optional();
+    }
+
+    const approval = getToolApprovalRequirement(mcpTool);
+    const desc = [
+      `[MCP: ${mcpTool.serverName}]`,
+      mcpTool.description || mcpTool.name,
+      approval === "confirm" ? "(requires confirmation)" : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
+
+    tools[toolId] = tool({
+      description: desc,
+      parameters: z.object(shape),
+      execute: async (args) => {
+        const startMs = Date.now();
+        try {
+          const result = await mcpManager.callTool(
+            mcpTool.serverId,
+            mcpTool.name,
+            args as Record<string, unknown>
+          );
+          audit({
+            userId: context.userId,
+            action: "mcp_tool_call",
+            skillId: mcpTool.name,
+            source: `mcp:${mcpTool.serverId}`,
+            input: args,
+            output: result.content,
+            durationMs: Date.now() - startMs,
+            success: !result.isError,
+          });
+          return {
+            success: !result.isError,
+            output:
+              typeof result.content === "string"
+                ? result.content
+                : JSON.stringify(result.content),
+            data: result.content,
+          };
+        } catch (err) {
+          audit({
+            userId: context.userId,
+            action: "mcp_tool_call",
+            skillId: mcpTool.name,
+            source: `mcp:${mcpTool.serverId}`,
+            input: args,
+            output: err instanceof Error ? err.message : String(err),
+            durationMs: Date.now() - startMs,
+            success: false,
+          });
+          return {
+            success: false,
+            output: `MCP tool error: ${err instanceof Error ? err.message : String(err)}`,
+          };
+        }
+      },
+    });
+  }
+
   return tools;
 }
 
@@ -167,6 +265,10 @@ export async function streamAgentResponse(params: {
 
   // Hydrate user's enabled integrations from DB so their tools are available
   await integrationRegistry.hydrateUserIntegrations(params.userId);
+
+  // Hydrate MCP server connections
+  await mcpManager.hydrateUserConnections(params.userId);
+  await mcpManager.hydrateGlobalConnections();
 
   const systemMessages: { role: "system"; content: string }[] = [
     { role: "system", content: SYSTEM_PROMPT },
@@ -205,6 +307,10 @@ export async function generateAgentResponse(params: {
 
   // Hydrate user's enabled integrations from DB so their tools are available
   await integrationRegistry.hydrateUserIntegrations(params.userId);
+
+  // Hydrate MCP server connections
+  await mcpManager.hydrateUserConnections(params.userId);
+  await mcpManager.hydrateGlobalConnections();
 
   const systemMessages: { role: "system"; content: string }[] = [
     { role: "system", content: SYSTEM_PROMPT },
