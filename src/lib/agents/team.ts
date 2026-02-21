@@ -1,6 +1,6 @@
 import { generateText } from "ai";
 import { AgentNode } from "./agent-node";
-import { resolveModelFromString } from "@/lib/ai/providers";
+import { resolveModelFromSettings } from "@/lib/ai/providers";
 import type {
   TeamDefinition,
   TeamRunConfig,
@@ -499,7 +499,7 @@ Original task: ${task}`,
       .join("\n\n---\n\n");
 
     const result = await generateText({
-      model: resolveModelFromString(process.env.AI_MODEL),
+      model: await resolveModelFromSettings(),
       messages: [
         {
           role: "system",
