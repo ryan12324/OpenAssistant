@@ -1,4 +1,4 @@
-import { generateText, streamText, tool } from "ai";
+import { generateText, streamText, tool, type CoreMessage } from "ai";
 import { z } from "zod";
 import { skillRegistry } from "@/lib/skills/registry";
 import { memoryManager } from "@/lib/rag/memory";
@@ -253,7 +253,7 @@ function buildTools(context: SkillContext) {
  * Run the AI agent with streaming for a chat message.
  */
 export async function streamAgentResponse(params: {
-  messages: { role: "user" | "assistant" | "system"; content: string }[];
+  messages: CoreMessage[];
   userId: string;
   conversationId: string;
   memoryContext?: string;
@@ -295,7 +295,7 @@ export async function streamAgentResponse(params: {
  * Generate a one-shot response (non-streaming).
  */
 export async function generateAgentResponse(params: {
-  messages: { role: "user" | "assistant" | "system"; content: string }[];
+  messages: CoreMessage[];
   userId: string;
   conversationId: string;
   memoryContext?: string;

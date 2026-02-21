@@ -1,16 +1,10 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
+import { useChat } from "ai/react";
+import type { Message, CreateMessage } from "ai/react";
 import { ChatInput } from "./chat-input";
 import { ChatMessage } from "./chat-message";
-import type { ToolCall } from "./chat-message";
-
-interface Message {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-  toolCalls?: ToolCall[];
-}
 
 interface ChatViewProps {
   conversationId?: string;
@@ -64,11 +58,33 @@ function formatAgentResult(result: {
 }
 
 export function ChatView({ conversationId, initialMessages }: ChatViewProps) {
-  const [messages, setMessages] = useState<Message[]>(initialMessages || []);
-  const [isLoading, setIsLoading] = useState(false);
   const [currentConvId, setCurrentConvId] = useState(conversationId);
   const scrollRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const [agentLoading, setAgentLoading] = useState(false);
+
+  const {
+    messages,
+    setMessages,
+    append,
+    status,
+    error,
+  } = useChat({
+    api: "/api/chat",
+    initialMessages: initialMessages || [],
+    body: { conversationId: currentConvId },
+    maxSteps: 10,
+    onResponse(response) {
+      const convId = response.headers.get("X-Conversation-Id");
+      if (convId && !currentConvId) {
+        setCurrentConvId(convId);
+        window.history.replaceState(null, "", `/chat/${convId}`);
+        window.dispatchEvent(new CustomEvent("conversationCreated"));
+      }
+    },
+  });
+
+  const isLoading = status !== "ready" || agentLoading;
 
   const scrollToBottom = useCallback(() => {
     if (scrollRef.current) {
@@ -244,26 +260,25 @@ export function ChatView({ conversationId, initialMessages }: ChatViewProps) {
   }
 
   async function handleSend(content: string) {
-    // Add user message
-    const userMsg: Message = {
-      id: crypto.randomUUID(),
-      role: "user",
-      content,
-    };
-    const newMessages = [...messages, userMsg];
-    setMessages(newMessages);
-    setIsLoading(true);
-
-    // Prepare assistant message placeholder
-    const assistantId = crypto.randomUUID();
-    setMessages((prev) => [
-      ...prev,
-      { id: assistantId, role: "assistant", content: "" },
-    ]);
-
     // Check for /team or /swarm commands
     const command = parseCommand(content);
     if (command.type !== "none" && command.id && command.task) {
+      // Handle team/swarm commands manually (outside useChat)
+      const userMsg: Message = {
+        id: crypto.randomUUID(),
+        role: "user",
+        content,
+        parts: [{ type: "text" as const, text: content }],
+      };
+      const assistantId = crypto.randomUUID();
+      const assistantMsg: Message = {
+        id: assistantId,
+        role: "assistant",
+        content: "",
+        parts: [{ type: "text" as const, text: "" }],
+      };
+      setMessages([...messages, userMsg, assistantMsg]);
+      setAgentLoading(true);
       try {
         abortRef.current = new AbortController();
         await handleAgentCommand(
@@ -271,7 +286,7 @@ export function ChatView({ conversationId, initialMessages }: ChatViewProps) {
           assistantId
         );
       } finally {
-        setIsLoading(false);
+        setAgentLoading(false);
       }
       return;
     }
@@ -284,194 +299,36 @@ export function ChatView({ conversationId, initialMessages }: ChatViewProps) {
           ? "- `/team research-team Research quantum computing advances`\n- `/team code-review-team Review this React component for issues`\n- `/team debate-team Should we use microservices or monolith?`\n- `/team planning-team Plan a mobile app for task management`\n- `/team creative-team Write a tagline for an AI product`"
           : "- `/swarm analysis-swarm Analyze the pros and cons of remote work`\n- `/swarm fact-check-swarm The Great Wall is visible from space`\n- `/swarm translation-swarm Translate 'Hello, how are you?' to French`";
 
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === assistantId
-            ? {
-                ...m,
-                content: `**Usage:** \`/${cmdType} <${cmdType}-id> <task description>\`\n\n**Examples:**\n${examples}`,
-              }
-            : m
-        )
-      );
-      setIsLoading(false);
+      const helpContent = `**Usage:** \`/${cmdType} <${cmdType}-id> <task description>\`\n\n**Examples:**\n${examples}`;
+      setMessages([
+        ...messages,
+        {
+          id: crypto.randomUUID(),
+          role: "user" as const,
+          content,
+          parts: [{ type: "text" as const, text: content }],
+        },
+        {
+          id: crypto.randomUUID(),
+          role: "assistant" as const,
+          content: helpContent,
+          parts: [{ type: "text" as const, text: helpContent }],
+        },
+      ]);
       return;
     }
 
-    try {
-      abortRef.current = new AbortController();
-
-      const res = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          messages: newMessages.map((m) => ({
-            role: m.role,
-            content: m.content,
-          })),
-          conversationId: currentConvId,
-        }),
-        signal: abortRef.current.signal,
-      });
-
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}`);
-      }
-
-      // Get conversation ID from response header
-      const convId = res.headers.get("X-Conversation-Id");
-      if (convId && !currentConvId) {
-        setCurrentConvId(convId);
-        // Update URL without navigation
-        window.history.replaceState(null, "", `/chat/${convId}`);
-      }
-
-      // Stream the response — parse the full Vercel AI SDK data stream protocol
-      const reader = res.body?.getReader();
-      const decoder = new TextDecoder();
-      let fullContent = "";
-      const toolCalls = new Map<string, ToolCall>();
-
-      if (reader) {
-        let buffer = "";
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n");
-          // Keep the last potentially incomplete line in the buffer
-          buffer = lines.pop() || "";
-
-          for (const line of lines) {
-            if (!line) continue;
-
-            try {
-              // 0: text delta
-              if (line.startsWith("0:")) {
-                const text = JSON.parse(line.slice(2));
-                fullContent += text;
-                setMessages((prev) =>
-                  prev.map((m) =>
-                    m.id === assistantId
-                      ? { ...m, content: fullContent, toolCalls: [...toolCalls.values()] }
-                      : m
-                  )
-                );
-              }
-              // 9: tool call begin — {"toolCallId":"...","toolName":"..."}
-              else if (line.startsWith("9:")) {
-                const data = JSON.parse(line.slice(2));
-                toolCalls.set(data.toolCallId, {
-                  id: data.toolCallId,
-                  name: data.toolName,
-                  state: "calling",
-                  args: "",
-                });
-                setMessages((prev) =>
-                  prev.map((m) =>
-                    m.id === assistantId
-                      ? { ...m, toolCalls: [...toolCalls.values()] }
-                      : m
-                  )
-                );
-              }
-              // b: tool call delta (streaming args)
-              else if (line.startsWith("b:")) {
-                const data = JSON.parse(line.slice(2));
-                const tc = toolCalls.get(data.toolCallId);
-                if (tc) {
-                  tc.args = (tc.args || "") + (data.argsTextDelta || "");
-                }
-              }
-              // a: tool result — {"toolCallId":"...","result":"..."}
-              else if (line.startsWith("a:")) {
-                const data = JSON.parse(line.slice(2));
-                const tc = toolCalls.get(data.toolCallId);
-                if (tc) {
-                  tc.state = "result";
-                  tc.result = typeof data.result === "string"
-                    ? data.result
-                    : JSON.stringify(data.result);
-                } else {
-                  toolCalls.set(data.toolCallId, {
-                    id: data.toolCallId,
-                    name: "tool",
-                    state: "result",
-                    result: typeof data.result === "string"
-                      ? data.result
-                      : JSON.stringify(data.result),
-                  });
-                }
-                setMessages((prev) =>
-                  prev.map((m) =>
-                    m.id === assistantId
-                      ? { ...m, toolCalls: [...toolCalls.values()] }
-                      : m
-                  )
-                );
-              }
-              // e: finish with metadata (step boundary)
-              // d: error
-              else if (line.startsWith("d:")) {
-                const data = JSON.parse(line.slice(2));
-                if (!fullContent) {
-                  fullContent = typeof data === "string" ? data : (data.message || "An error occurred.");
-                  setMessages((prev) =>
-                    prev.map((m) =>
-                      m.id === assistantId
-                        ? { ...m, content: fullContent, toolCalls: [...toolCalls.values()] }
-                        : m
-                    )
-                  );
-                }
-              }
-              // Other prefixes (e:, c:, etc.) — skip silently
-            } catch {
-              // Skip malformed lines
-            }
-          }
-        }
-      }
-
-      // If no text was streamed but tool calls happened, show a summary
-      if (!fullContent && toolCalls.size > 0) {
-        fullContent = "Done.";
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === assistantId
-              ? { ...m, content: fullContent, toolCalls: [...toolCalls.values()] }
-              : m
-          )
-        );
-      } else if (!fullContent) {
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === assistantId
-              ? { ...m, content: "I processed your request." }
-              : m
-          )
-        );
-      }
-    } catch (error) {
-      if (error instanceof DOMException && error.name === "AbortError") {
-        return;
-      }
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === assistantId
-            ? {
-                ...m,
-                content:
-                  "Sorry, I encountered an error. Please try again.",
-              }
-            : m
-        )
-      );
-    } finally {
-      setIsLoading(false);
-    }
+    // Normal message — use the useChat append which handles streaming automatically
+    await append({ role: "user", content } as CreateMessage);
   }
+
+  // Check if the last assistant message is still loading (submitted but no content yet)
+  const lastMsg = messages[messages.length - 1];
+  const showLoading =
+    (status === "submitted" || agentLoading) &&
+    lastMsg?.role === "assistant" &&
+    !lastMsg.content &&
+    (!lastMsg.parts || lastMsg.parts.length === 0);
 
   return (
     <div className="flex h-full flex-col">
@@ -512,26 +369,28 @@ export function ChatView({ conversationId, initialMessages }: ChatViewProps) {
             {messages.map((msg) => (
               <ChatMessage
                 key={msg.id}
-                role={msg.role}
+                role={msg.role as "user" | "assistant" | "system"}
                 content={msg.content}
-                toolCalls={msg.toolCalls}
+                parts={msg.parts}
               />
             ))}
-            {isLoading &&
-              messages[messages.length - 1]?.role === "assistant" &&
-              !messages[messages.length - 1]?.content &&
-              !(messages[messages.length - 1]?.toolCalls?.length) && (
-                <div className="flex gap-4 px-4 py-4">
-                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-primary text-xs font-bold text-primary-foreground">
-                    OA
-                  </div>
-                  <div className="flex items-center gap-1 rounded-lg bg-card px-4 py-3">
-                    <span className="h-2 w-2 animate-bounce rounded-full bg-muted-foreground [animation-delay:0ms]" />
-                    <span className="h-2 w-2 animate-bounce rounded-full bg-muted-foreground [animation-delay:150ms]" />
-                    <span className="h-2 w-2 animate-bounce rounded-full bg-muted-foreground [animation-delay:300ms]" />
-                  </div>
+            {showLoading && (
+              <div className="flex gap-4 px-4 py-4">
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-primary text-xs font-bold text-primary-foreground">
+                  OA
                 </div>
-              )}
+                <div className="flex items-center gap-1 rounded-lg bg-card px-4 py-3">
+                  <span className="h-2 w-2 animate-bounce rounded-full bg-muted-foreground [animation-delay:0ms]" />
+                  <span className="h-2 w-2 animate-bounce rounded-full bg-muted-foreground [animation-delay:150ms]" />
+                  <span className="h-2 w-2 animate-bounce rounded-full bg-muted-foreground [animation-delay:300ms]" />
+                </div>
+              </div>
+            )}
+            {error && (
+              <div className="mx-4 my-2 rounded-lg border border-red-400/30 bg-red-400/10 px-4 py-3 text-sm text-red-400">
+                {error.message || "An error occurred. Please try again."}
+              </div>
+            )}
           </div>
         )}
       </div>

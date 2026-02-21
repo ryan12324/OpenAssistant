@@ -3,22 +3,22 @@
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { cn } from "@/lib/utils";
+import type { ToolInvocation } from "ai";
 
-export interface ToolCall {
-  id: string;
-  name: string;
-  state: "calling" | "result" | "error";
-  args?: string;
-  result?: string;
-}
+type MessagePart =
+  | { type: "text"; text: string }
+  | { type: "tool-invocation"; toolInvocation: ToolInvocation }
+  | { type: "reasoning"; reasoning: string }
+  | { type: "step-start" };
 
 interface ChatMessageProps {
   role: "user" | "assistant" | "system";
   content: string;
-  toolCalls?: ToolCall[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  parts?: any[];
 }
 
-export function ChatMessage({ role, content, toolCalls }: ChatMessageProps) {
+export function ChatMessage({ role, content, parts }: ChatMessageProps) {
   if (role === "system") return null;
 
   return (
@@ -42,16 +42,9 @@ export function ChatMessage({ role, content, toolCalls }: ChatMessageProps) {
             : "bg-card text-card-foreground"
         )}
       >
-        {/* Tool calls (collapsed by default) */}
-        {role === "assistant" && toolCalls && toolCalls.length > 0 && (
-          <div className="mb-2 space-y-1">
-            {toolCalls.map((tc) => (
-              <ToolCallCard key={tc.id} toolCall={tc} />
-            ))}
-          </div>
-        )}
-
-        {role === "assistant" ? (
+        {role === "assistant" && parts ? (
+          <AssistantParts parts={parts} />
+        ) : role === "assistant" ? (
           <div className="prose-chat">
             <ReactMarkdown>{content}</ReactMarkdown>
           </div>
@@ -69,16 +62,44 @@ export function ChatMessage({ role, content, toolCalls }: ChatMessageProps) {
   );
 }
 
-function ToolCallCard({ toolCall }: { toolCall: ToolCall }) {
+function AssistantParts({ parts }: { parts: unknown[] }) {
+  if (!parts || parts.length === 0) return null;
+
+  return (
+    <>
+      {parts.map((rawPart, i) => {
+        const part = rawPart as MessagePart;
+        if (part.type === "text") {
+          if (!part.text) return null;
+          return (
+            <div key={i} className="prose-chat">
+              <ReactMarkdown>{part.text}</ReactMarkdown>
+            </div>
+          );
+        }
+        if (part.type === "tool-invocation") {
+          return (
+            <div key={i} className="mb-2">
+              <ToolCallCard toolInvocation={part.toolInvocation} />
+            </div>
+          );
+        }
+        return null;
+      })}
+    </>
+  );
+}
+
+function ToolCallCard({ toolInvocation }: { toolInvocation: ToolInvocation }) {
   const [open, setOpen] = useState(false);
 
-  // Friendly display name: strip mcp_ prefix, replace underscores
-  const displayName = toolCall.name
+  const displayName = toolInvocation.toolName
     .replace(/^mcp_[^_]+__/, "")
     .replace(/_/g, " ");
 
-  const isRunning = toolCall.state === "calling";
-  const isError = toolCall.state === "error";
+  const isRunning =
+    toolInvocation.state === "call" || toolInvocation.state === "partial-call";
+  const isResult = toolInvocation.state === "result";
 
   return (
     <div className="rounded-md border border-border bg-background/50 text-xs">
@@ -89,28 +110,54 @@ function ToolCallCard({ toolCall }: { toolCall: ToolCall }) {
         {/* Status icon */}
         {isRunning ? (
           <span className="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" />
-        ) : isError ? (
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0 text-red-400">
-            <circle cx="12" cy="12" r="10" />
-            <path d="M15 9l-6 6M9 9l6 6" />
+        ) : isResult ? (
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            className="shrink-0 text-green-400"
+          >
+            <path d="M20 6L9 17l-5-5" />
           </svg>
         ) : (
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0 text-green-400">
-            <path d="M20 6L9 17l-5-5" />
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            className="shrink-0 text-red-400"
+          >
+            <circle cx="12" cy="12" r="10" />
+            <path d="M15 9l-6 6M9 9l6 6" />
           </svg>
         )}
 
         {/* Tool name */}
-        <span className={cn("flex-1 font-medium", isError && "text-red-400")}>
+        <span className="flex-1 font-medium">
           {displayName}
-          {isRunning && <span className="ml-1 text-muted-foreground">...</span>}
+          {isRunning && (
+            <span className="ml-1 text-muted-foreground">...</span>
+          )}
         </span>
 
         {/* Chevron */}
         {!isRunning && (
           <svg
-            width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
-            className={cn("shrink-0 text-muted-foreground transition-transform", open && "rotate-180")}
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            className={cn(
+              "shrink-0 text-muted-foreground transition-transform",
+              open && "rotate-180"
+            )}
           >
             <path d="M6 9l6 6 6-6" />
           </svg>
@@ -120,19 +167,27 @@ function ToolCallCard({ toolCall }: { toolCall: ToolCall }) {
       {/* Collapsed content */}
       {open && !isRunning && (
         <div className="border-t border-border px-2.5 py-2 text-muted-foreground">
-          {toolCall.args && (
+          {toolInvocation.args && (
             <div className="mb-1.5">
               <span className="font-medium text-foreground/60">Input: </span>
               <pre className="mt-0.5 max-h-32 overflow-auto whitespace-pre-wrap break-all rounded bg-muted p-1.5 text-[11px]">
-                {formatJson(toolCall.args)}
+                {formatJson(
+                  typeof toolInvocation.args === "string"
+                    ? toolInvocation.args
+                    : JSON.stringify(toolInvocation.args)
+                )}
               </pre>
             </div>
           )}
-          {toolCall.result && (
+          {"result" in toolInvocation && toolInvocation.result != null && (
             <div>
               <span className="font-medium text-foreground/60">Output: </span>
               <pre className="mt-0.5 max-h-48 overflow-auto whitespace-pre-wrap break-all rounded bg-muted p-1.5 text-[11px]">
-                {formatJson(toolCall.result)}
+                {formatJson(
+                  typeof toolInvocation.result === "string"
+                    ? toolInvocation.result
+                    : JSON.stringify(toolInvocation.result)
+                )}
               </pre>
             </div>
           )}

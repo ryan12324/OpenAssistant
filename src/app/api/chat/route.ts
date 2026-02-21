@@ -1,9 +1,11 @@
 import { NextRequest } from "next/server";
+import { convertToCoreMessages, generateText } from "ai";
 import { requireSession } from "@/lib/auth-server";
 import { prisma } from "@/lib/prisma";
 import { streamAgentResponse } from "@/lib/ai/agent";
 import { memoryManager } from "@/lib/rag/memory";
 import { maybeCompact } from "@/lib/compaction";
+import { resolveModelFromSettings } from "@/lib/ai/providers";
 
 export async function POST(req: NextRequest) {
   try {
@@ -15,7 +17,8 @@ export async function POST(req: NextRequest) {
       messages,
       conversationId,
     }: {
-      messages: { role: "user" | "assistant"; content: string }[];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      messages: any[];
       conversationId?: string;
     } = body;
 
@@ -25,12 +28,15 @@ export async function POST(req: NextRequest) {
 
     // Get or create conversation
     let convId = conversationId;
+    const isNewConversation = !convId;
     if (!convId) {
+      const firstContent = typeof messages[0]?.content === "string"
+        ? messages[0].content
+        : "";
       const conversation = await prisma.conversation.create({
         data: {
           userId,
-          title:
-            messages[0]?.content.slice(0, 100) || "New Conversation",
+          title: firstContent.slice(0, 100) || "New Conversation",
         },
       });
       convId = conversation.id;
@@ -39,11 +45,14 @@ export async function POST(req: NextRequest) {
     // Save the user message
     const lastMessage = messages[messages.length - 1];
     if (lastMessage?.role === "user") {
+      const content = typeof lastMessage.content === "string"
+        ? lastMessage.content
+        : JSON.stringify(lastMessage.content);
       await prisma.message.create({
         data: {
           conversationId: convId,
           role: "user",
-          content: lastMessage.content,
+          content,
           source: "web",
         },
       });
@@ -53,8 +62,10 @@ export async function POST(req: NextRequest) {
     let memoryContext: string | undefined;
     try {
       const userQuery = messages
-        .filter((m) => m.role === "user")
-        .map((m) => m.content)
+        .filter((m: { role: string }) => m.role === "user")
+        .map((m: { content: unknown }) =>
+          typeof m.content === "string" ? m.content : ""
+        )
         .slice(-3)
         .join(" ");
       memoryContext = await memoryManager.recall({
@@ -66,9 +77,12 @@ export async function POST(req: NextRequest) {
       // Memory recall is best-effort
     }
 
+    // Convert UI messages from useChat to core messages for the AI SDK
+    const coreMessages = convertToCoreMessages(messages);
+
     // Stream the AI response
     const result = await streamAgentResponse({
-      messages,
+      messages: coreMessages,
       userId,
       conversationId: convId,
       memoryContext: memoryContext || undefined,
@@ -88,13 +102,48 @@ export async function POST(req: NextRequest) {
 
         // Auto-save short-term memory of the interaction
         try {
+          const userContent = typeof lastMessage?.content === "string"
+            ? lastMessage.content
+            : "";
           await memoryManager.store({
             userId,
-            content: `User asked: "${lastMessage?.content?.slice(0, 200)}"\nAssistant responded about: ${text.slice(0, 200)}`,
+            content: `User asked: "${userContent.slice(0, 200)}"\nAssistant responded about: ${text.slice(0, 200)}`,
             type: "short_term",
           });
         } catch {
           // Best-effort
+        }
+
+        // Generate an AI title for new conversations
+        if (isNewConversation) {
+          try {
+            const userContent = typeof lastMessage?.content === "string"
+              ? lastMessage.content
+              : "";
+            const titleResult = await generateText({
+              model: await resolveModelFromSettings(),
+              messages: [
+                {
+                  role: "system",
+                  content:
+                    "Generate a concise title (max 50 chars) for this conversation. Reply with ONLY the title, no quotes or punctuation at the end.",
+                },
+                {
+                  role: "user",
+                  content: `User: "${userContent.slice(0, 300)}"\nAssistant: "${text.slice(0, 300)}"`,
+                },
+              ],
+            });
+            const title = titleResult.text.trim().slice(0, 80);
+            if (title) {
+              await prisma.conversation.update({
+                where: { id: convId! },
+                data: { title },
+              });
+            }
+          } catch {
+            // Title generation is best-effort
+          }
         }
 
         // Compact conversation if it has grown too large
