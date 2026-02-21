@@ -16,6 +16,14 @@ describe("register()", () => {
   it("calls initWorker which imports logger and worker when NEXT_RUNTIME is 'nodejs'", async () => {
     process.env.NEXT_RUNTIME = "nodejs";
 
+    // Track when the internal initWorker promise resolves
+    let resolveWorker!: () => void;
+    const workerDone = new Promise<void>((r) => { resolveWorker = r; });
+
+    mockStartWorker.mockImplementation(() => {
+      resolveWorker();
+    });
+
     vi.doMock("@/lib/logger", () => ({
       getLogger: mockGetLogger,
     }));
@@ -26,11 +34,10 @@ describe("register()", () => {
     const { register } = await import("@/instrumentation");
     register();
 
-    // Wait for the internal initWorker() promise to settle
-    await vi.waitFor(() => {
-      expect(mockGetLogger).toHaveBeenCalledWith("instrumentation");
-    });
+    // Wait for the full async initWorker chain to complete
+    await workerDone;
 
+    expect(mockGetLogger).toHaveBeenCalledWith("instrumentation");
     expect(mockLog.info).toHaveBeenCalledWith(
       "Server starting — initializing background worker",
       { runtime: "nodejs" }
@@ -54,8 +61,8 @@ describe("register()", () => {
     const { register } = await import("@/instrumentation");
     register();
 
-    // Give time for any async work to settle
-    await new Promise((r) => setTimeout(r, 10));
+    // Give microtasks a chance to settle
+    await new Promise((r) => setTimeout(r, 50));
 
     expect(mockGetLogger).not.toHaveBeenCalled();
     expect(mockStartWorker).not.toHaveBeenCalled();
@@ -74,8 +81,8 @@ describe("register()", () => {
     const { register } = await import("@/instrumentation");
     register();
 
-    // Give time for any async work to settle
-    await new Promise((r) => setTimeout(r, 10));
+    // Give microtasks a chance to settle
+    await new Promise((r) => setTimeout(r, 50));
 
     expect(mockGetLogger).not.toHaveBeenCalled();
     expect(mockStartWorker).not.toHaveBeenCalled();
@@ -88,6 +95,13 @@ describe("register()", () => {
 
     const initError = new Error("Worker init failed");
 
+    let resolveCatch!: () => void;
+    const catchDone = new Promise<void>((r) => { resolveCatch = r; });
+
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {
+      resolveCatch();
+    });
+
     vi.doMock("@/lib/logger", () => ({
       getLogger: mockGetLogger,
     }));
@@ -97,18 +111,16 @@ describe("register()", () => {
       },
     }));
 
-    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-
     const { register } = await import("@/instrumentation");
     register();
 
     // Wait for the catch handler to fire
-    await vi.waitFor(() => {
-      expect(consoleErrorSpy).toHaveBeenCalledWith(
-        "Failed to initialize worker:",
-        initError
-      );
-    });
+    await catchDone;
+
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      "Failed to initialize worker:",
+      initError
+    );
 
     consoleErrorSpy.mockRestore();
     delete process.env.NEXT_RUNTIME;
