@@ -10,6 +10,9 @@ import type {
   AgentMessage,
   AgentEvent,
 } from "./types";
+import { getLogger } from "@/lib/logger";
+
+const log = getLogger("agents.team");
 
 /**
  * TeamOrchestrator — Manages a team of agents collaborating on a task.
@@ -32,6 +35,12 @@ export class TeamOrchestrator {
 
   async run(config: TeamRunConfig): Promise<TeamRunResult> {
     const start = Date.now();
+    log.info("Team run started", {
+      teamId: this.definition.id,
+      strategy: this.definition.strategy,
+      agentCount: this.definition.agents.length,
+      taskLength: config.task.length,
+    });
 
     switch (this.definition.strategy) {
       case "sequential":
@@ -117,6 +126,7 @@ export class TeamOrchestrator {
     let currentContext = config.context || "";
 
     for (const agent of this.definition.agents) {
+      log.info("Sequential agent starting", { teamId: this.definition.id, agentId: agent.id, agentName: agent.name });
       const node = this.nodes.get(agent.id)!;
       const result = await node.run({
         task: config.task,
@@ -126,6 +136,7 @@ export class TeamOrchestrator {
         conversationId: config.conversationId,
       });
 
+      log.info("Sequential agent completed", { teamId: this.definition.id, agentId: agent.id, durationMs: result.durationMs, outputLength: result.output.length });
       recordAgentExecution(transcript, agentResults, agent, result);
 
       currentContext = result.output;
@@ -133,13 +144,16 @@ export class TeamOrchestrator {
 
     const finalOutput = await this.synthesize(config.task, agentResults, transcript);
 
+    const durationMs = Date.now() - start;
+    log.info("Team sequential run completed", { teamId: this.definition.id, durationMs, agentCount: agentResults.length });
+
     return {
       teamId: this.definition.id,
       task: config.task,
       strategy: "sequential",
       transcript,
       finalOutput,
-      durationMs: Date.now() - start,
+      durationMs,
       agentResults,
     };
   }
@@ -281,7 +295,12 @@ export class TeamOrchestrator {
     const supervisorId = this.definition.supervisorId || this.definition.agents[0]?.id;
     const supervisor = this.nodes.get(supervisorId!);
 
-    if (!supervisor) throw new Error("Supervisor agent not found");
+    if (!supervisor) {
+      log.error("Supervisor agent not found", { teamId: this.definition.id, supervisorId });
+      throw new Error("Supervisor agent not found");
+    }
+
+    log.info("Supervisor strategy starting", { teamId: this.definition.id, supervisorId });
 
     const workers = this.definition.agents.filter((a) => a.id !== supervisorId);
     const workerList = workers.map((w) => `- ${w.id}: ${w.name} — ${w.role}`).join("\n");
@@ -318,9 +337,12 @@ Only respond with the JSON array, nothing else.`,
       const jsonMatch = planResult.output.match(/\[[\s\S]*\]/);
       if (jsonMatch) {
         assignments = JSON.parse(jsonMatch[0]);
+        log.info("Supervisor decomposed task", { teamId: this.definition.id, assignmentCount: assignments.length });
+      } else {
+        log.warn("Supervisor output contained no JSON array", { teamId: this.definition.id });
       }
     } catch {
-      // If parsing fails, give the whole task to all workers
+      log.warn("Failed to parse supervisor assignments, distributing task to all workers", { teamId: this.definition.id });
       assignments = workers.map((w) => ({ agent_id: w.id, subtask: config.task }));
     }
 
@@ -404,6 +426,7 @@ Original task: ${config.task}`,
     if (this.definition.synthesizerId) {
       const synthesizer = this.nodes.get(this.definition.synthesizerId);
       if (synthesizer) {
+        log.info("Synthesizing via designated agent", { teamId: this.definition.id, synthesizerId: this.definition.synthesizerId });
         const result = await synthesizer.run({
           task: `Synthesize the following agent outputs into a single, cohesive response for the user.
 
@@ -414,34 +437,44 @@ Original task: ${task}`,
         });
         return result.output;
       }
+      log.warn("Designated synthesizer not found, falling back", { teamId: this.definition.id, synthesizerId: this.definition.synthesizerId });
     }
 
     // If only one agent, return its output directly
     if (agentResults.length === 1) {
+      log.debug("Single agent result, skipping synthesis", { teamId: this.definition.id });
       return agentResults[0].output;
     }
 
     // Otherwise, use LLM to synthesize
+    log.info("Synthesizing team outputs via LLM", { teamId: this.definition.id, resultCount: agentResults.length });
+    const start = Date.now();
     const agentOutputs = agentResults
       .map((r) => `**${r.agentName}:**\n${r.output}`)
       .join("\n\n---\n\n");
 
-    const result = await generateText({
-      model: await resolveModelFromSettings(),
-      messages: [
-        {
-          role: "system",
-          content:
-            "You are a synthesis agent. Combine the following agent outputs into a single, clear, and comprehensive response. Preserve the best ideas from each agent. Be concise.",
-        },
-        {
-          role: "user",
-          content: `Task: ${task}\n\nAgent outputs:\n\n${agentOutputs}`,
-        },
-      ],
-      maxTokens: 4096,
-    });
+    try {
+      const result = await generateText({
+        model: await resolveModelFromSettings(),
+        messages: [
+          {
+            role: "system",
+            content:
+              "You are a synthesis agent. Combine the following agent outputs into a single, clear, and comprehensive response. Preserve the best ideas from each agent. Be concise.",
+          },
+          {
+            role: "user",
+            content: `Task: ${task}\n\nAgent outputs:\n\n${agentOutputs}`,
+          },
+        ],
+        maxTokens: 4096,
+      });
 
-    return result.text;
+      log.info("Team synthesis LLM call completed", { teamId: this.definition.id, durationMs: Date.now() - start, outputLength: result.text.length });
+      return result.text;
+    } catch (err) {
+      log.error("Team synthesis LLM call failed", { teamId: this.definition.id, durationMs: Date.now() - start, error: err instanceof Error ? err.message : String(err) });
+      throw err;
+    }
   }
 }
