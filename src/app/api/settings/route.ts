@@ -1,6 +1,7 @@
 import { requireSession } from "@/lib/auth-server";
 import { getSettings, updateSettings, getEffectiveAIConfig } from "@/lib/settings";
-import { getLogger } from "@/lib/logger";
+import { getLogger, maskSecret } from "@/lib/logger";
+import { handleApiError } from "@/lib/api-utils";
 
 const log = getLogger("api.settings");
 
@@ -18,41 +19,32 @@ export async function GET() {
       model: s.aiModel || "",
     });
 
-    // Mask API keys: show last 4 chars only
-    const mask = (v: string | null) =>
-      v ? `${"*".repeat(Math.max(0, v.length - 4))}${v.slice(-4)}` : "";
-
     return Response.json({
       aiProvider: s.aiProvider || "",
       aiModel: s.aiModel || "",
       openaiBaseUrl: s.openaiBaseUrl || "",
       // Masked keys
-      openaiApiKey: mask(s.openaiApiKey),
-      anthropicApiKey: mask(s.anthropicApiKey),
-      googleAiApiKey: mask(s.googleAiApiKey),
-      mistralApiKey: mask(s.mistralApiKey),
-      xaiApiKey: mask(s.xaiApiKey),
-      deepseekApiKey: mask(s.deepseekApiKey),
-      moonshotApiKey: mask(s.moonshotApiKey),
-      openrouterApiKey: mask(s.openrouterApiKey),
-      perplexityApiKey: mask(s.perplexityApiKey),
-      minimaxApiKey: mask(s.minimaxApiKey),
-      glmApiKey: mask(s.glmApiKey),
-      huggingfaceApiKey: mask(s.huggingfaceApiKey),
-      vercelAiGatewayKey: mask(s.vercelAiGatewayKey),
+      openaiApiKey: maskSecret(s.openaiApiKey),
+      anthropicApiKey: maskSecret(s.anthropicApiKey),
+      googleAiApiKey: maskSecret(s.googleAiApiKey),
+      mistralApiKey: maskSecret(s.mistralApiKey),
+      xaiApiKey: maskSecret(s.xaiApiKey),
+      deepseekApiKey: maskSecret(s.deepseekApiKey),
+      moonshotApiKey: maskSecret(s.moonshotApiKey),
+      openrouterApiKey: maskSecret(s.openrouterApiKey),
+      perplexityApiKey: maskSecret(s.perplexityApiKey),
+      minimaxApiKey: maskSecret(s.minimaxApiKey),
+      glmApiKey: maskSecret(s.glmApiKey),
+      huggingfaceApiKey: maskSecret(s.huggingfaceApiKey),
+      vercelAiGatewayKey: maskSecret(s.vercelAiGatewayKey),
       // Embedding
       embeddingProvider: s.embeddingProvider || "",
       embeddingModel: s.embeddingModel || "",
-      embeddingApiKey: mask(s.embeddingApiKey),
+      embeddingApiKey: maskSecret(s.embeddingApiKey),
       embeddingBaseUrl: s.embeddingBaseUrl || "",
     });
   } catch (error) {
-    if (error instanceof Error && error.message === "Unauthorized") {
-      log.warn("Unauthorized access attempt on GET /api/settings");
-      return Response.json({ error: "Unauthorized" }, { status: 401 });
-    }
-    log.error("Failed to fetch settings", { error });
-    return Response.json({ error: "Internal server error" }, { status: 500 });
+    return handleApiError(error, "GET /api/settings");
   }
 }
 
@@ -115,11 +107,6 @@ export async function PATCH(req: Request) {
 
     return Response.json({ status: "ok", updatedAt: updated.updatedAt });
   } catch (error) {
-    if (error instanceof Error && error.message === "Unauthorized") {
-      log.warn("Unauthorized access attempt on PATCH /api/settings");
-      return Response.json({ error: "Unauthorized" }, { status: 401 });
-    }
-    log.error("Failed to update settings", { error });
-    return Response.json({ error: "Internal server error" }, { status: 500 });
+    return handleApiError(error, "PATCH /api/settings");
   }
 }

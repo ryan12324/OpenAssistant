@@ -32,7 +32,7 @@ export class BrowserInstance extends BaseIntegration<BrowserConfig> {
       case "browser_extract_text": {
         // Simplified: uses fetch for basic text extraction
         try {
-          const res = await fetch(args.url as string, { headers: { "User-Agent": "OpenAssistant/0.1" }, signal: AbortSignal.timeout(10000) });
+          const res = await fetch(args.url as string, { headers: { "User-Agent": process.env.USER_AGENT ?? "OpenAssistant/0.1" }, signal: AbortSignal.timeout(Number(process.env.FETCH_TIMEOUT_MS ?? "10000")) });
           const html = await res.text();
           const text = html.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "").replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 5000);
           return { success: true, output: text };

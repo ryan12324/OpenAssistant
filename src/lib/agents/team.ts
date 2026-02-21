@@ -1,6 +1,7 @@
 import { generateText } from "ai";
-import { AgentNode } from "./agent-node";
 import { resolveModelFromSettings } from "@/lib/ai/providers";
+import { initializeNodes, recordAgentExecution } from "./utils";
+import type { TranscriptEntry, AgentResult } from "./utils";
 import type {
   TeamDefinition,
   TeamRunConfig,
@@ -25,10 +26,7 @@ export class TeamOrchestrator {
 
   constructor(definition: TeamDefinition) {
     this.definition = definition;
-    this.nodes = new Map();
-    for (const agent of definition.agents) {
-      this.nodes.set(agent.id, new AgentNode(agent));
-    }
+    this.nodes = initializeNodes(definition.agents);
   }
 
   async run(config: TeamRunConfig): Promise<TeamRunResult> {
@@ -61,8 +59,8 @@ export class TeamOrchestrator {
     };
 
     const start = Date.now();
-    const transcript: AgentMessage[] = [];
-    const agentResults: TeamRunResult["agentResults"] = [];
+    const transcript: TranscriptEntry[] = [];
+    const agentResults: AgentResult[] = [];
 
     const agentOrder = this.definition.agents;
 
@@ -84,16 +82,7 @@ export class TeamOrchestrator {
         yield event;
 
         if (event.type === "agent_done") {
-          transcript.push({
-            agentId: agent.id,
-            agentName: agent.name,
-            role: "agent",
-            content: event.output,
-            timestamp: new Date(),
-          });
-          agentResults.push({
-            agentId: agent.id,
-            agentName: agent.name,
+          recordAgentExecution(transcript, agentResults, agent, {
             output: event.output,
             durationMs: event.durationMs,
           });
@@ -121,8 +110,8 @@ export class TeamOrchestrator {
     config: TeamRunConfig,
     start: number
   ): Promise<TeamRunResult> {
-    const transcript: AgentMessage[] = [];
-    const agentResults: TeamRunResult["agentResults"] = [];
+    const transcript: TranscriptEntry[] = [];
+    const agentResults: AgentResult[] = [];
 
     let currentContext = config.context || "";
 
@@ -136,20 +125,7 @@ export class TeamOrchestrator {
         conversationId: config.conversationId,
       });
 
-      transcript.push({
-        agentId: agent.id,
-        agentName: agent.name,
-        role: "agent",
-        content: result.output,
-        timestamp: new Date(),
-      });
-
-      agentResults.push({
-        agentId: agent.id,
-        agentName: agent.name,
-        output: result.output,
-        durationMs: result.durationMs,
-      });
+      recordAgentExecution(transcript, agentResults, agent, result);
 
       currentContext = result.output;
     }
@@ -172,8 +148,8 @@ export class TeamOrchestrator {
     start: number
   ): Promise<TeamRunResult> {
     const maxRounds = this.definition.maxRounds || 3;
-    const transcript: AgentMessage[] = [];
-    const agentResults: TeamRunResult["agentResults"] = [];
+    const transcript: TranscriptEntry[] = [];
+    const agentResults: AgentResult[] = [];
 
     for (let round = 0; round < maxRounds; round++) {
       for (const agent of this.definition.agents) {
@@ -192,20 +168,7 @@ export class TeamOrchestrator {
           conversationId: config.conversationId,
         });
 
-        transcript.push({
-          agentId: agent.id,
-          agentName: agent.name,
-          role: "agent",
-          content: result.output,
-          timestamp: new Date(),
-        });
-
-        agentResults.push({
-          agentId: agent.id,
-          agentName: agent.name,
-          output: result.output,
-          durationMs: result.durationMs,
-        });
+        recordAgentExecution(transcript, agentResults, agent, result);
       }
     }
 

@@ -30,7 +30,7 @@ export class WebhooksInstance extends BaseIntegration<WebhooksConfig> {
         const method = (args.method as string) || "POST";
         const headers: Record<string, string> = { "Content-Type": "application/json" };
         if (args.headers) Object.assign(headers, JSON.parse(args.headers as string));
-        const res = await fetch(args.url as string, { method, headers, body: args.body as string, signal: AbortSignal.timeout(10000) });
+        const res = await fetch(args.url as string, { method, headers, body: args.body as string, signal: AbortSignal.timeout(Number(process.env.FETCH_TIMEOUT_MS ?? "10000")) });
         const text = await res.text();
         return { success: res.ok, output: `Webhook ${method} ${args.url} → ${res.status}\n${text.slice(0, 500)}`, data: { status: res.status } };
       } catch (e) { return { success: false, output: `Webhook failed: ${e instanceof Error ? e.message : "Unknown error"}` }; }
