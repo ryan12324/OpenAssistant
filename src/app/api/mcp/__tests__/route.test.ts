@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { mockRequireSession, mockPrisma, mockMcpManager, mockLoadGlobalMcpServers, mockGetToolPermissionLabel, mockLog } = vi.hoisted(() => ({
+const { mockRequireSession, mockPrisma, mockMcpManager, mockLoadGlobalMcpServers, mockGetToolPermissionLabel, mockLog, mockHandleApiError } = vi.hoisted(() => ({
   mockRequireSession: vi.fn(),
   mockPrisma: {
     mcpServer: { findMany: vi.fn(), upsert: vi.fn(), findFirst: vi.fn(), delete: vi.fn() },
@@ -14,6 +14,12 @@ const { mockRequireSession, mockPrisma, mockMcpManager, mockLoadGlobalMcpServers
   mockLoadGlobalMcpServers: vi.fn(),
   mockGetToolPermissionLabel: vi.fn(),
   mockLog: { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
+  mockHandleApiError: vi.fn((error: unknown) => {
+    if (error instanceof Error && error.message === "Unauthorized") {
+      return Response.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    return Response.json({ error: "Internal server error" }, { status: 500 });
+  }),
 }));
 
 vi.mock("@/lib/auth-server", () => ({
@@ -38,6 +44,10 @@ vi.mock("@/lib/mcp/permissions", () => ({
 
 vi.mock("@/lib/logger", () => ({
   getLogger: () => mockLog,
+}));
+
+vi.mock("@/lib/api-utils", () => ({
+  handleApiError: (...args: unknown[]) => mockHandleApiError(...args),
 }));
 
 import { GET, POST, DELETE } from "../route";
