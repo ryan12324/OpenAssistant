@@ -9,7 +9,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 FROM base AS deps
 WORKDIR /app
 COPY package.json package-lock.json* ./
-RUN npm ci --ignore-scripts && npx prisma generate || true
+ENV DATABASE_URL="file:./placeholder.db"
+RUN npm ci --ignore-scripts && npx prisma generate
 
 # ─── Build ───────────────────────────────────────────────────
 FROM base AS builder
@@ -19,6 +20,8 @@ COPY . .
 
 # Generate Prisma client & build Next.js (standalone output)
 ENV NEXT_TELEMETRY_DISABLED=1
+# Dummy DATABASE_URL for prisma generate (it only reads the schema, no DB connection)
+ENV DATABASE_URL="file:./placeholder.db"
 RUN npx prisma generate
 RUN npm run build
 
