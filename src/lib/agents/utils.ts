@@ -5,7 +5,7 @@ import type { AgentPersona } from "./types";
 export interface TranscriptEntry {
   agentId: string;
   agentName: string;
-  role: string;
+  role: "agent" | "user" | "system" | "handoff";
   content: string;
   timestamp: Date;
 }

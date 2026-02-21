@@ -41,30 +41,6 @@ Guidelines:
 7. **Use MCP tools**: You have access to tools from connected MCP servers (external services). These tools are prefixed with "mcp_" in their names. Use them when relevant to the user's request.`;
 
 /**
- * Wraps tool execution with timing, logging, and audit tracking.
- */
-async function executeWithAudit(
-  toolName: string,
-  toolType: string,
-  userId: string,
-  fn: () => Promise<string>,
-): Promise<string> {
-  const startMs = Date.now();
-  try {
-    const result = await fn();
-    const durationMs = Date.now() - startMs;
-    log.info(`${toolType} tool completed`, { tool: toolName, durationMs });
-    audit({ userId, action: `tool.${toolType}`, target: toolName, durationMs, success: true });
-    return result;
-  } catch (err) {
-    const durationMs = Date.now() - startMs;
-    log.error(`${toolType} tool failed`, { tool: toolName, error: err, durationMs });
-    audit({ userId, action: `tool.${toolType}`, target: toolName, durationMs, success: false });
-    return `Error executing ${toolName}: ${err instanceof Error ? err.message : String(err)}`;
-  }
-}
-
-/**
  * Hydrates integrations, MCP connections, and builds initial system messages.
  */
 async function initializeAgentContext(

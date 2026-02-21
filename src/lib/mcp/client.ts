@@ -1,6 +1,6 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { prisma } from "@/lib/prisma";
 import { loadGlobalMcpServers } from "./global-config";
 import { getLogger } from "@/lib/logger";
@@ -22,8 +22,8 @@ class McpClientManager {
   private servers = new Map<string, McpServerState>();
   /** serverId → MCP Client instance */
   private clients = new Map<string, Client>();
-  /** serverId → StdioClientTransport (for cleanup) */
-  private transports = new Map<string, StdioClientTransport | StreamableHTTPClientTransport>();
+  /** serverId → transport (for cleanup) */
+  private transports = new Map<string, Transport>();
   /** Track which users have been hydrated this process tick */
   private hydratedUsers = new Set<string>();
   private globalHydrated = false;
@@ -60,10 +60,11 @@ class McpClientManager {
         { capabilities: {} }
       );
 
-      let transport: StdioClientTransport | StreamableHTTPClientTransport;
+      let transport: Transport;
 
       if (config.transport === "stdio") {
         if (!config.command) throw new Error("stdio transport requires a command");
+        const { StdioClientTransport } = await import(/* webpackIgnore: true */ "@modelcontextprotocol/sdk/client/stdio.js");
         transport = new StdioClientTransport({
           command: config.command,
           args: config.args ?? [],

@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { mcpManager } from "@/lib/mcp/client";
 import { loadGlobalMcpServers } from "@/lib/mcp/global-config";
 import { getToolPermissionLabel } from "@/lib/mcp/permissions";
+import type { McpDiscoveredTool } from "@/lib/mcp/types";
 import { getLogger } from "@/lib/logger";
 import { handleApiError } from "@/lib/api-utils";
 
@@ -12,9 +13,9 @@ const log = getLogger("api.mcp");
 interface McpLiveState {
   config: { id: string };
   status: string;
-  error: string | null;
-  tools: Array<{ name: string; description: string }>;
-  connectedAt: string | null;
+  error?: string;
+  tools: McpDiscoveredTool[];
+  connectedAt?: Date;
 }
 
 /** Map a server config + optional live state to a response object. */

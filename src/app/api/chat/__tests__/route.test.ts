@@ -212,7 +212,7 @@ describe("POST /api/chat", () => {
     expect(mockGenerateText).not.toHaveBeenCalled();
   });
 
-  it("handles non-string message content for first message", async () => {
+  it("uses empty string for title when first message content is empty", async () => {
     mockRequireSession.mockResolvedValue({ user: { id: "user-1" } });
     mockPrisma.conversation.create.mockResolvedValue({ id: "conv-1" });
     mockPrisma.message.create.mockResolvedValue({});
@@ -221,9 +221,9 @@ describe("POST /api/chat", () => {
     mockStreamAgentResponse.mockResolvedValue(result);
 
     const req = makeRequest({
-      messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+      messages: [{ role: "user", content: "" }],
     });
-    const res = await POST(req as any);
+    await POST(req as any);
 
     expect(mockPrisma.conversation.create).toHaveBeenCalledWith({
       data: {
@@ -231,16 +231,6 @@ describe("POST /api/chat", () => {
         title: "New Conversation",
       },
     });
-
-    // user message with non-string content should be JSON stringified
-    expect(mockPrisma.message.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          content: JSON.stringify([{ type: "text", text: "hi" }]),
-          role: "user",
-        }),
-      })
-    );
 
     resolveText("");
     await new Promise((r) => setTimeout(r, 50));
@@ -647,7 +637,7 @@ describe("POST /api/chat", () => {
     expect(mockHandleApiError).toHaveBeenCalledWith("non-error-string", "process chat");
   });
 
-  it("handles lastMessage with non-string content in text promise branch", async () => {
+  it("handles empty lastMessage content in text promise branch", async () => {
     mockRequireSession.mockResolvedValue({ user: { id: "user-1" } });
     mockPrisma.conversation.create.mockResolvedValue({ id: "conv-new" });
     mockPrisma.message.create.mockResolvedValue({});
@@ -657,7 +647,7 @@ describe("POST /api/chat", () => {
 
     const req = makeRequest({
       messages: [
-        { role: "user", content: [{ type: "image" }] },
+        { role: "user", content: "" },
       ],
     });
     await POST(req as any);

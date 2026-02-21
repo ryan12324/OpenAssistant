@@ -12,8 +12,8 @@ import { handleApiError } from "@/lib/api-utils";
 const log = getLogger("api.chat");
 
 interface UserMessage {
-  role: string;
-  content: string | Record<string, unknown>;
+  role: "system" | "user" | "assistant" | "data";
+  content: string;
 }
 
 export async function POST(req: NextRequest) {
@@ -47,9 +47,7 @@ export async function POST(req: NextRequest) {
     let convId = conversationId;
     const isNewConversation = !convId;
     if (!convId) {
-      const firstContent = typeof messages[0]?.content === "string"
-        ? messages[0].content
-        : "";
+      const firstContent = messages[0]?.content ?? "";
       const conversation = await prisma.conversation.create({
         data: {
           userId,
@@ -66,14 +64,11 @@ export async function POST(req: NextRequest) {
     // Save the user message
     const lastMessage = messages[messages.length - 1];
     if (lastMessage?.role === "user") {
-      const content = typeof lastMessage.content === "string"
-        ? lastMessage.content
-        : JSON.stringify(lastMessage.content);
       await prisma.message.create({
         data: {
           conversationId: resolvedConvId,
           role: "user",
-          content,
+          content: lastMessage.content,
           source: "web",
         },
       });
@@ -86,9 +81,7 @@ export async function POST(req: NextRequest) {
       log.debug("Attempting memory recall", { userId });
       const userQuery = messages
         .filter((m: { role: string }) => m.role === "user")
-        .map((m: { content: unknown }) =>
-          typeof m.content === "string" ? m.content : ""
-        )
+        .map((m: { content: string }) => m.content)
         .slice(-3)
         .join(" ");
       memoryContext = await memoryManager.recall({
@@ -151,9 +144,7 @@ export async function POST(req: NextRequest) {
 
         // Auto-save short-term memory of the interaction
         try {
-          const userContent = typeof lastMessage?.content === "string"
-            ? lastMessage.content
-            : "";
+          const userContent = lastMessage?.content ?? "";
           await memoryManager.store({
             userId,
             content: `User asked: "${userContent.slice(0, 200)}"\nAssistant responded about: ${text.slice(0, 200)}`,

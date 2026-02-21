@@ -14,10 +14,12 @@ export function register() {
 }
 
 async function initWorker() {
-  const { getLogger } = await import("@/lib/logger");
+  // webpackIgnore prevents webpack from bundling these server-only modules
+  // into the Edge runtime build where Node.js builtins are unavailable.
+  const { getLogger } = await import(/* webpackIgnore: true */ "@/lib/logger");
   const log = getLogger("instrumentation");
   log.info("Server starting — initializing background worker", { runtime: process.env.NEXT_RUNTIME });
-  const { initWorker: startWorker } = await import("@/lib/worker");
+  const { initWorker: startWorker } = await import(/* webpackIgnore: true */ "@/lib/worker");
   startWorker();
   log.info("Instrumentation complete — worker initialized");
 }
