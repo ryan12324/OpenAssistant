@@ -167,21 +167,26 @@ export function resolveModel(config: ModelConfig): LanguageModelV1 {
 export async function resolveModelFromSettings(): Promise<LanguageModelV1> {
   const config = await getEffectiveAIConfig();
 
+  const configProvider = (config.provider || "openai") as AIProvider;
   const modelStr = config.model || "";
+
   if (modelStr) {
-    const { provider, model } = parseModelString(modelStr);
+    const parsed = parseModelString(modelStr);
+    // If the model string has an explicit provider prefix (e.g. "anthropic/claude-...")
+    // use that; otherwise honour the provider stored in the DB/env config.
+    const hasPrefix = modelStr.includes("/");
+    const provider = hasPrefix ? parsed.provider : configProvider;
     return resolveModel({
       provider,
-      model,
+      model: parsed.model,
       apiKey: config.apiKey,
       baseUrl: config.baseUrl || undefined,
     });
   }
 
-  const provider = (config.provider || "openai") as AIProvider;
-  const defaults = PROVIDER_DEFAULTS[provider];
+  const defaults = PROVIDER_DEFAULTS[configProvider];
   return resolveModel({
-    provider,
+    provider: configProvider,
     model: defaults?.defaultModel || "gpt-4o",
     apiKey: config.apiKey,
     baseUrl: config.baseUrl || undefined,
