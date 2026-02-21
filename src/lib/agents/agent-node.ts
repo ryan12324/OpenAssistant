@@ -2,7 +2,7 @@ import { generateText, streamText, tool } from "ai";
 import { z } from "zod";
 import { skillRegistry } from "@/lib/skills/registry";
 import { integrationRegistry } from "@/lib/integrations";
-import { resolveModelFromString, resolveModelFromSettings } from "@/lib/ai/providers";
+import { resolveModelFromSettings } from "@/lib/ai/providers";
 import type { AgentPersona, AgentMessage, AgentEvent } from "./types";
 import type { SkillContext } from "@/lib/skills/types";
 
@@ -36,9 +36,7 @@ export class AgentNode {
 
     const messages = this.buildMessages(params.task, params.context, params.history);
 
-    const model = this.persona.model
-      ? resolveModelFromString(this.persona.model)
-      : await resolveModelFromSettings();
+    const model = await resolveModelFromSettings();
 
     const result = await generateText({
       model,
@@ -80,9 +78,7 @@ export class AgentNode {
     const messages = this.buildMessages(params.task, params.context, params.history);
 
     try {
-      const streamModel = this.persona.model
-        ? resolveModelFromString(this.persona.model)
-        : await resolveModelFromSettings();
+      const streamModel = await resolveModelFromSettings();
 
       const stream = streamText({
         model: streamModel,
