@@ -42,7 +42,7 @@ export interface ModelConfig {
  * supports any OpenAI-compatible endpoint and these providers all
  * expose compatible endpoints.
  */
-const PROVIDER_DEFAULTS: Record<
+export const PROVIDER_DEFAULTS: Record<
   AIProvider,
   { baseUrl: string; defaultModel: string; envKey: string; headerKey?: string }
 > = {
@@ -210,7 +210,7 @@ export async function resolveModelFromSettings(): Promise<LanguageModelV1> {
  * If it matches the *current* provider's default, it's also safe to discard
  * (it's redundant). Only genuinely custom URLs are kept.
  */
-function sanitizeBaseUrl(raw: string | undefined | null, currentProvider: AIProvider): string | undefined {
+export function sanitizeBaseUrl(raw: string | undefined | null, currentProvider: AIProvider): string | undefined {
   if (!raw) return undefined;
 
   // Check if the stored URL matches any provider's default
